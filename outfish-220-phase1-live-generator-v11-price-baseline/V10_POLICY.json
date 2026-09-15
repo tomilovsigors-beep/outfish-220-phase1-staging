@@ -1,0 +1,16 @@
+{
+  "version": "V10_PRODUCTION_SCHEMA",
+  "schema_source": "actual current production feed, confirmed identical tag order across all 672 overlapping pilot SKUs",
+  "xml_tag_order": [
+    "sku",
+    "ean",
+    "price-before-discount",
+    "price-after-discount",
+    "stock",
+    "collectionhours"
+  ],
+  "price_rule": "generated generic 220 price = max(current 220 selling price, live Shopify price)",
+  "zero_stock_collectionhours": "preserve legacy collectionhours; block if missing",
+  "fhm_in_scope": false,
+  "production_switch": false
+}

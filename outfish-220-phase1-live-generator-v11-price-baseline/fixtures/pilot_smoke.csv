@@ -1,0 +1,3 @@
+﻿sku,ean,price_before,price_after,stock,collectionhours,shopify_sku,vendor,match_status,shopify_price,current_220_price,price_raised,stock_source
+310630-0999-42,4056264353709,170.0,170.0,4,48,310630-0999-42,Lowa,MATCH_EXPLICIT_220_MAPPING,165.0,170.0,False,LOWA
+ss1873,5908221344314,105.0,105.0,3,24,ss1873,Fjord Nansen,MATCH_EXPLICIT_220_MAPPING,105.0,105.0,False,STORE
