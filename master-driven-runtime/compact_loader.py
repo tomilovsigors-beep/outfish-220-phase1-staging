@@ -1,33 +1,29 @@
 from pathlib import Path
-import base64,csv,gzip
+import base64,lzma
 ROOT=Path(__file__).resolve().parent
-CONFIG=ROOT/'config'
-MAP=CONFIG/'inventory_source_map.csv'
-BASE=CONFIG/'production_equivalent_baseline.csv'
+BUNDLE=ROOT/'config'/'locked_mapped_gids.b64'
 
-def decode_b64_gz(path):
-    return gzip.decompress(base64.b64decode(path.read_bytes())).decode('utf-8').splitlines()
+def _read_varint(data,pos):
+    n=0; shift=0
+    while True:
+        if pos>=len(data): raise RuntimeError('truncated varint')
+        b=data[pos]; pos+=1; n|=(b&127)<<shift
+        if not b&128:return n,pos
+        shift+=7
 
-def ensure_config():
-    sm=CONFIG/'source_map_min.b64'; bm=CONFIG/'baseline_min.b64'
-    if not sm.exists() or not bm.exists():
-        return
-    MAP.parent.mkdir(parents=True,exist_ok=True)
-    with MAP.open('w',encoding='utf-8',newline='') as f:
-        fields=['220_sku','220_ean','inventory_source_type','inventory_source_key']
-        w=csv.DictWriter(f,fieldnames=fields); w.writeheader()
-        for line in decode_b64_gz(sm):
-            p=line.split('|')
-            if p[0]=='S' and len(p)==4:
-                w.writerow({'220_sku':p[1],'220_ean':p[2],'inventory_source_type':'SHOPIFY_MAPPED','inventory_source_key':'gid://shopify/ProductVariant/'+p[3]})
-            elif p[0]=='E' and len(p)==3:
-                w.writerow({'220_sku':p[1],'220_ean':p[2],'inventory_source_type':'LEGACY_EXTERNAL_SOURCE','inventory_source_key':'SIA_FHM:Sheet1:sku='+p[1]})
-            else: raise RuntimeError('invalid compact source map line')
-    with BASE.open('w',encoding='utf-8',newline='') as f:
-        fields=['220_sku','baseline_stock','baseline_collectionhours']
-        w=csv.DictWriter(f,fieldnames=fields); w.writeheader()
-        for line in decode_b64_gz(bm):
-            p=line.split('|',2)
-            if len(p)!=3: raise RuntimeError('invalid compact baseline line')
-            w.writerow({'220_sku':p[0],'baseline_stock':p[1],'baseline_collectionhours':p[2]})
-ensure_config()
+def _unzig(n): return -(n//2)-1 if n&1 else n//2
+
+def load_locked_mapped(canonical_skus):
+    if not BUNDLE.exists(): raise FileNotFoundError(BUNDLE)
+    raw=lzma.decompress(base64.b64decode(BUNDLE.read_bytes()))
+    out={}; pos=0; idx=0; gid=0
+    while pos<len(raw):
+        di,pos=_read_varint(raw,pos); zg,pos=_read_varint(raw,pos)
+        idx+=di; gid+=_unzig(zg)
+        if idx>=len(canonical_skus): raise RuntimeError('locked mapped index outside canonical Master set')
+        sku=canonical_skus[idx]
+        if sku in out: raise RuntimeError('duplicate locked mapped SKU')
+        out[sku]='gid://shopify/ProductVariant/'+str(gid)
+    if len(out)!=970 or len(set(out.values()))!=970:
+        raise RuntimeError(f'locked mapped gate failed {len(out)}/{len(set(out.values()))}')
+    return out
