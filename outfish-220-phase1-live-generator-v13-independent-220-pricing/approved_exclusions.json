@@ -1,0 +1,20 @@
+{
+  "approved_exclusions": [
+    {
+      "shopify_sku": "B004OUBJES",
+      "marketplace_sku": "B004OUBJES",
+      "marketplace_ean": "4046872162107",
+      "reason": "PHASE1_SKIP_NOT_PRESENT_IN_LIVE_SHOPIFY",
+      "approved_scope": "PHASE1_NON_FHM_PILOT",
+      "evidence": "Live Shopify search by SKU/barcode/vendor returned no product on 2026-09-15."
+    },
+    {
+      "shopify_sku": "B004OU7XOI",
+      "marketplace_sku": "B004OU7XOI",
+      "marketplace_ean": "4046872162138",
+      "reason": "PHASE1_SKIP_NOT_PRESENT_IN_LIVE_SHOPIFY",
+      "approved_scope": "PHASE1_NON_FHM_PILOT",
+      "evidence": "Live Shopify search by SKU/barcode/vendor returned no product on 2026-09-15."
+    }
+  ]
+}

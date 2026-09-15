@@ -1,0 +1,27 @@
+{
+  "meta": {"source": "SMOKE_FIXTURE", "fetched_at": "2026-09-15T00:00:00+00:00"},
+  "nodes": [
+    {
+      "id": "gid://shopify/ProductVariant/example1",
+      "sku": "310630-0999-42",
+      "barcode": "",
+      "price": "165.00",
+      "product": {"id": "gid://shopify/Product/example1", "title": "LOWA example", "vendor": "Lowa", "status": "ACTIVE"},
+      "inventoryItem": {"id": "gid://shopify/InventoryItem/example1", "inventoryLevels": {"nodes": [
+        {"location": {"id": "gid://shopify/Location/84891861330", "name": "Cēsu iela 18, Veikals"}, "quantities": [{"name": "on_hand", "quantity": 0}]},
+        {"location": {"id": "gid://shopify/Location/107817075026", "name": "Cēcu 18, (Lowa)"}, "quantities": [{"name": "on_hand", "quantity": 4}]}
+      ]}}
+    },
+    {
+      "id": "gid://shopify/ProductVariant/example2",
+      "sku": "ss1873",
+      "barcode": "",
+      "price": "105.00",
+      "product": {"id": "gid://shopify/Product/example2", "title": "Fjord example", "vendor": "Fjord Nansen", "status": "ACTIVE"},
+      "inventoryItem": {"id": "gid://shopify/InventoryItem/example2", "inventoryLevels": {"nodes": [
+        {"location": {"id": "gid://shopify/Location/84891861330", "name": "Cēsu iela 18, Veikals"}, "quantities": [{"name": "on_hand", "quantity": 1}]},
+        {"location": {"id": "gid://shopify/Location/107805770066", "name": "Cēsu 18, (Fjord Nansen)"}, "quantities": [{"name": "on_hand", "quantity": 6}]}
+      ]}}
+    }
+  ]
+}

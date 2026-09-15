@@ -1,0 +1,25 @@
+{
+  "version": "V9_FINAL_GATE",
+  "zero_stock_collectionhours": "Preserve legacy collectionhours; block if missing.",
+  "pricing": {
+    "lv": "max(current 220/LV price, live Shopify price)",
+    "lt": "preserve current 220 feed price",
+    "ee": "preserve current 220 feed price",
+    "fi": "preserve current 220 feed price"
+  },
+  "xml_tag_order": [
+    "sku",
+    "ean",
+    "price-before-discount-lt",
+    "price-after-discount-lt",
+    "price-before-discount-lv",
+    "price-after-discount-lv",
+    "price-before-discount-ee",
+    "price-after-discount-ee",
+    "price-before-discount-fi",
+    "price-after-discount-fi",
+    "stock",
+    "collectionhours"
+  ],
+  "production_switch": false
+}

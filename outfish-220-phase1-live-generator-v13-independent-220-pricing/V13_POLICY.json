@@ -1,0 +1,9 @@
+{
+  "version": "V13_INDEPENDENT_220_PRICING",
+  "shopify_price_used_for_220": false,
+  "default_220_price_source": "current production 220 feed",
+  "price_override_source": "220_price_overrides.csv",
+  "stock_source": "live Shopify on_hand via approved routing",
+  "full_feed_merge": "672 approved candidate SKUs replaced; 999 other production rows preserved",
+  "production_switch": false
+}

@@ -1,0 +1,17 @@
+{
+  "version": "V12_FULL_FEED_MERGE",
+  "phase1_candidate_rows": 672,
+  "current_production_rows": 1671,
+  "expected_untouched_rows": 999,
+  "merge_rule": "replace only candidate SKUs in current production; preserve all other production rows",
+  "hard_checks": [
+    "candidate subset of production",
+    "all 672 candidate rows overlap",
+    "no EAN changes",
+    "merged row count equals production row count",
+    "merged SKU set equals production SKU set",
+    "merged candidate rows equal approved V11 candidate",
+    "untouched production rows preserved"
+  ],
+  "production_switch": false
+}

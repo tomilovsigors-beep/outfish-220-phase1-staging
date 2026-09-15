@@ -1,0 +1,33 @@
+{
+  "source_file": "production-diff.json",
+  "overlap_rows": 672,
+  "unique_production_tag_orders": 1,
+  "production_tag_order": [
+    "sku",
+    "ean",
+    "price-before-discount",
+    "price-after-discount",
+    "stock",
+    "collectionhours"
+  ],
+  "candidate_v9_tag_order": [
+    "sku",
+    "ean",
+    "price-before-discount-lt",
+    "price-after-discount-lt",
+    "price-before-discount-lv",
+    "price-after-discount-lv",
+    "price-before-discount-ee",
+    "price-after-discount-ee",
+    "price-before-discount-fi",
+    "price-after-discount-fi",
+    "stock",
+    "collectionhours"
+  ],
+  "ean_change_count": 0,
+  "duplicate_candidate_skus": 0,
+  "duplicate_production_skus": 0,
+  "price_decrease_count": 0,
+  "stock_change_count": 268,
+  "collectionhours_change_count": 41
+}
