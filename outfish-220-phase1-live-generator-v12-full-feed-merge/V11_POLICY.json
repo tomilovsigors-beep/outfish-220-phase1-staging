@@ -1,0 +1,17 @@
+{
+  "version": "V11_PRICE_BASELINE",
+  "production_schema": [
+    "sku",
+    "ean",
+    "price-before-discount",
+    "price-after-discount",
+    "stock",
+    "collectionhours"
+  ],
+  "selling_price_rule": "price-after-discount = max(current production selling price, live Shopify price)",
+  "before_discount_rule": "price-before-discount = max(current production price-before-discount, generated selling price)",
+  "reason": "V10 had 188 decreases, all exclusively in price-before-discount; selling price itself had no decreases",
+  "zero_stock_collectionhours": "preserve legacy collectionhours; block if missing",
+  "production_switch": false,
+  "fhm_in_scope": false
+}
