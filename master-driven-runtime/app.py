@@ -1,5 +1,6 @@
 import json, os, threading, time
 from flask import Flask, Response, send_file
+import compact_loader
 from runtime import refresh,current_state,current_file
 app=Flask(__name__)
 
