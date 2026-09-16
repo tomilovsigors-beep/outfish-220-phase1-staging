@@ -1,6 +1,6 @@
 from __future__ import annotations
-import csv, io, json, os, threading, time, traceback
-from flask import Flask, Response
+import csv, io, json, os, threading, time, traceback, hashlib
+from flask import Flask, Response, request
 from app import _master_rows, _shopify_products, _load_json
 from generator import build
 from content_runtime import build_snapshot, persist_snapshot
@@ -82,6 +82,14 @@ def title_qa(): return _artifact('title-qa.csv','text/csv')
 def blockers(): return _artifact('content-blockers.csv','text/csv')
 @app.get('/master-bulk-write-proposal.csv')
 def proposal(): return _artifact('master-bulk-write-proposal.csv','text/csv')
+@app.get('/master-bulk-write-proposal.json')
+def proposal_json():
+    try: offset=max(0,int(request.args.get('offset','0'))); limit=max(1,min(500,int(request.args.get('limit','500'))))
+    except Exception: return _json({'error':'invalid pagination'},400)
+    with LOCK: b=STATE['artifacts'].get('master-bulk-write-proposal.csv'); ds=STATE['summary'].get('dataset_hash')
+    if not b: return _json({'error':'proposal unavailable'},503)
+    rows=list(csv.DictReader(io.StringIO(b.decode('utf-8-sig'))))
+    return _json({'dataset_hash':ds,'proposal_sha256':hashlib.sha256(b).hexdigest(),'total':len(rows),'offset':offset,'limit':limit,'rows':rows[offset:offset+limit]})
 @app.get('/master-bulk-write-report.json')
 def write_report(): return _artifact('master-bulk-write-report.json','application/json')
 @app.get('/master-bulk-write-dry-run.csv')
@@ -110,8 +118,7 @@ def _maybe_run_master_write():
     try:
         with LOCK: arts=dict(STATE['artifacts']); summ=dict(STATE['summary'])
         report,newarts=run_controlled_master_write(arts,summ)
-        with LOCK:
-            STATE['artifacts'].update(newarts); STATE['master_write']=report
+        with LOCK: STATE['artifacts'].update(newarts); STATE['master_write']=report
         print('CONTROLLED_MASTER_WRITE_RESULT',json.dumps(report,sort_keys=True),flush=True)
     except Exception as e:
         with LOCK: STATE['master_write']={'status':'ERROR','error':f'{type(e).__name__}: {e}'}
@@ -122,7 +129,6 @@ def _boot():
     restored=_restore_latest()
     if restored:
         _selftest_recovered_routes(); _maybe_run_master_write(); return
-    try:
-        refresh(); _maybe_run_master_write()
+    try: refresh(); _maybe_run_master_write()
     except Exception: pass
 threading.Thread(target=_boot,daemon=True).start()
