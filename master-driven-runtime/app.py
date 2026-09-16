@@ -1,13 +1,52 @@
 import json, os, threading, time
+import requests
 from flask import Flask, Response, send_file
 import compact_loader
 from runtime import refresh,current_state,current_file
 app=Flask(__name__)
 
+_token_lock=threading.RLock()
+_token_expires_at=0.0
+
+def ensure_shopify_access_token():
+    """Populate SHOPIFY_ACCESS_TOKEN from staging client credentials without exposing secrets."""
+    global _token_expires_at
+    client_id=os.getenv('SHOPIFY_CLIENT_ID')
+    client_secret=os.getenv('SHOPIFY_CLIENT_SECRET')
+    if not client_id or not client_secret:
+        if os.getenv('SHOPIFY_ACCESS_TOKEN'):
+            return
+        raise RuntimeError('Shopify credentials missing: set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET')
+    with _token_lock:
+        if os.getenv('SHOPIFY_ACCESS_TOKEN') and time.time() < _token_expires_at-60:
+            return
+        shop=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
+        if not shop:
+            raise RuntimeError('SHOPIFY_SHOP_DOMAIN missing')
+        r=requests.post(
+            f'https://{shop}/admin/oauth/access_token',
+            headers={'Content-Type':'application/x-www-form-urlencoded'},
+            data={'grant_type':'client_credentials','client_id':client_id,'client_secret':client_secret},
+            timeout=30,
+        )
+        if not r.ok:
+            raise RuntimeError(f'Shopify client-credentials token request failed HTTP {r.status_code}')
+        payload=r.json()
+        token=payload.get('access_token')
+        expires_in=int(payload.get('expires_in') or 0)
+        if not token or expires_in<=0:
+            raise RuntimeError('Shopify client-credentials response missing access_token/expires_in')
+        os.environ['SHOPIFY_ACCESS_TOKEN']=token
+        _token_expires_at=time.time()+expires_in
+
+def run_refresh():
+    ensure_shopify_access_token()
+    return refresh()
+
 def bg():
     interval=max(300,int(os.getenv('REFRESH_SECONDS','900')))
     while True:
-        try: refresh()
+        try: run_refresh()
         except Exception as e: print('refresh failed',repr(e),flush=True)
         time.sleep(interval)
 threading.Thread(target=bg,daemon=True).start()
@@ -37,5 +76,5 @@ def blockers():return serve('blockers.csv','text/csv')
 def comp():return serve('production-equivalent-comparison.csv','text/csv')
 @app.post('/refresh')
 def manual_refresh():
-    try:return j(refresh())
+    try:return j(run_refresh())
     except Exception:return health()
