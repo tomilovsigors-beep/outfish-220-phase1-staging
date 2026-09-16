@@ -2,8 +2,17 @@ import json, os, threading, time
 import requests
 from flask import Flask, Response, send_file
 import compact_loader
+import runtime as runtime_module
 from runtime import refresh,current_state,current_file
 app=Flask(__name__)
+
+# SIA FHM currently has legacy header whitespace (for example "sku ").
+# Normalize only the staging read layer; source data is not modified.
+_original_fetch_sia=runtime_module.fetch_sia
+def normalized_fetch_sia():
+    raw, rows=_original_fetch_sia()
+    return raw,[{str(k).strip():v for k,v in r.items()} for r in rows]
+runtime_module.fetch_sia=normalized_fetch_sia
 
 _token_lock=threading.RLock()
 _token_expires_at=0.0
