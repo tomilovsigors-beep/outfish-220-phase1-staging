@@ -11,28 +11,6 @@ def on_starting(server):
             from title_activation import run_title_activation
             report,_=run_title_activation()
             server.log.info('TITLE_ACTIVATION_RESULT %s',json.dumps(report,sort_keys=True))
-        if os.getenv('RUN_NONCATEGORY_METADATA_AUDIT','').strip()=='1':
-            from noncategory_metadata_audit import run as run_metadata
-            report=run_metadata()
-            server.log.info('NONCATEGORY_METADATA_AUDIT_RESULT %s',json.dumps(report,sort_keys=True))
-        if os.getenv('RUN_NONCATEGORY_BACKGROUND_AUDIT','').strip()=='1':
-            try:
-                import PIL
-                server.log.info('NONCATEGORY_BACKGROUND_PIL_AVAILABLE %s',getattr(PIL,'__version__','unknown'))
-                from noncategory_audit import run_noncategory_audit
-                report,arts=run_noncategory_audit()
-                import psycopg
-                db=os.getenv('DATABASE_URL') or ''
-                if db:
-                    with psycopg.connect(db) as c:
-                        with c.cursor() as cur:
-                            cur.execute('create table if not exists product_xml_noncategory_background_audit (id integer primary key default 1, updated_at timestamptz not null default now(), summary jsonb not null, artifacts jsonb not null)')
-                            payload={k:v.decode('utf-8',errors='replace') for k,v in arts.items()}
-                            cur.execute('insert into product_xml_noncategory_background_audit(id,summary,artifacts) values(1,%s::jsonb,%s::jsonb) on conflict(id) do update set updated_at=now(),summary=excluded.summary,artifacts=excluded.artifacts',(json.dumps(report),json.dumps(payload)))
-                        c.commit()
-                server.log.info('NONCATEGORY_BACKGROUND_AUDIT_RESULT %s',json.dumps(report,sort_keys=True))
-            except Exception as exc:
-                server.log.warning('NONCATEGORY_BACKGROUND_AUDIT_ERROR %s %s',type(exc).__name__,str(exc)[:2000])
         if os.getenv('RUN_IDENTITY_DUP_DIAG','')!='1':
             return
         import psycopg
@@ -60,4 +38,4 @@ def on_starting(server):
         dups=[{'220_sku':sku,'220_ean':ean,'rows':rows} for (sku,ean),rows in sorted(idmap.items()) if len(rows)>1]
         server.log.info('MASTER_IDENTITY_DUP_DIAG %s',json.dumps({'proposal_identities':len(proposal),'duplicate_identities':len(dups),'duplicates':dups},sort_keys=True))
     except Exception as exc:
-        server.log.warning('STARTUP_DIAG_OR_AUDIT_ERROR %s %s', type(exc).__name__, str(exc)[:2000])
+        server.log.warning('STARTUP_DIAG_OR_TITLE_ERROR %s %s', type(exc).__name__, str(exc)[:2000])
