@@ -114,9 +114,10 @@ def _selftest_recovered_routes():
 
 def _maybe_run_master_write():
     flag=os.getenv('RUN_CONTROLLED_MASTER_WRITE','').strip()
-    if flag!=EXPECTED_DATASET_HASH: return
+    if flag!='APPROVED': return
     try:
         with LOCK: arts=dict(STATE['artifacts']); summ=dict(STATE['summary'])
+        if str(summ.get('dataset_hash') or '')!=EXPECTED_DATASET_HASH: raise RuntimeError('approved write flag set but dataset hash mismatch')
         report,newarts=run_controlled_master_write(arts,summ)
         with LOCK: STATE['artifacts'].update(newarts); STATE['master_write']=report
         print('CONTROLLED_MASTER_WRITE_RESULT',json.dumps(report,sort_keys=True),flush=True)
