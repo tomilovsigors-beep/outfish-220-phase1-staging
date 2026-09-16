@@ -23,14 +23,13 @@ def canonical_master(rows):
 
 
 def _cdata(v):
-    return "<![CDATA[" + norm(v).replace("]]>", "]]\]\]><![CDATA[>") + "]]>>" if False else "<![CDATA[" + norm(v).replace("]]>", "]]\]\]><![CDATA[>") + "]] >".replace(" ]]> ", "]]>")
+    return "<![CDATA[" + norm(v).replace("]]>", "]]\]\]><![CDATA[>") + "]]>>" if False else "<![CDATA[" + norm(v).replace("]]>", "]]]]><![CDATA[>") + "]]>"
 
 
 def _tag(name, value, indent, cdata=True):
     p = " " * indent
     if cdata:
-        text = norm(value).replace("]]>", "]]\]\]><![CDATA[>")
-        return f"{p}<{name}><![CDATA[{text}]]></{name}>"
+        return f"{p}<{name}>{_cdata(value)}</{name}>"
     return f"{p}<{name}>{norm(value)}</{name}>"
 
 
@@ -88,7 +87,7 @@ def _package_value(r, variant, name):
 def _image_metadata_ok(images, resolved_main):
     if not images or not resolved_main:
         return False
-    ok = []
+    checks = []
     main_in_meta = False
     for im in images:
         url = norm(im.get("url"))
@@ -100,8 +99,8 @@ def _image_metadata_ok(images, resolved_main):
         https_ok = url.lower().startswith("https://")
         type_ok = mime in {"image/jpeg", "image/jpg", "image/png"} or bool(re.search(r"\.(jpe?g|png)(?:\?|$)", url, re.I))
         size_ok = isinstance(width, int) and isinstance(height, int) and width >= 1000 and height >= 1000
-        ok.append(https_ok and type_ok and size_ok)
-    return main_in_meta and bool(ok) and all(ok[:max(1, min(2, len(ok)))])
+        checks.append(https_ok and type_ok and size_ok)
+    return main_in_meta and bool(checks) and all(checks[:max(1, min(2, len(checks)))])
 
 
 def build(master_rows, shopify_by_product_id, category_mapping=None, category_fields=None):
@@ -193,7 +192,6 @@ def build(master_rows, shopify_by_product_id, category_mapping=None, category_fi
             ("width", "MISSING_PACKAGE_WIDTH"),
         ):
             package[dim] = _package_value(r, variant, dim)
-            # PHH fashion exemption is category-dependent; do not invent it before category mapping exists.
             if cat and not is_fashion and not package[dim]:
                 reasons.append(blocker)
 
@@ -265,7 +263,6 @@ def build(master_rows, shopify_by_product_id, category_mapping=None, category_fi
         row = first["row"]
         source = first["source"] or {}
         xml_lines.append("  <product>")
-        # PHH template order: category, title/description, properties, colours/images/modifications.
         xml_lines.append(_tag("category-id", row["category_id"], 4))
         xml_lines.append(_tag("category-name", row["category_name"], 4))
         xml_lines.append(_tag("title", row["220_title"], 4))
