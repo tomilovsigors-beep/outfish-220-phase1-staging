@@ -7,6 +7,7 @@ from price_impact_audit import run_price_impact_audit
 app=Flask(__name__)
 
 _token_lock=threading.RLock(); _token_expires_at=0.0
+_bg_start_lock=threading.Lock(); _bg_started=False
 
 def ensure_shopify_access_token():
     global _token_expires_at
@@ -58,34 +59,33 @@ def _startup_recover():
         return None
 
 # Recovery is intentionally synchronous. Gunicorn does not finish importing this
-# module (and therefore does not expose the worker as ready) until the durable
-# current snapshot has been read back, hash-verified, and restored to runtime state.
+# module until the durable current snapshot has been read back, hash-verified,
+# and restored to runtime state.
 _startup_recovery=_startup_recover()
 
 def bg():
+    # This thread is started from Flask request handling, i.e. after Gunicorn has
+    # forked the worker. Starting it at module import can fork a worker while an
+    # RLock is held, leaving the child permanently blocked on that inherited lock.
+    initial_delay=max(60,int(os.getenv('STARTUP_BACKGROUND_DELAY_SECONDS','60')))
     interval=max(300,int(os.getenv('REFRESH_SECONDS','900')))
-    count=max(1,int(os.getenv('STARTUP_SOAK_REFRESHES','3'))); pause=max(0,int(os.getenv('STARTUP_SOAK_PAUSE_SECONDS','10')))
-    previous=None; previous_rows=None
-    for i in range(count):
-        try:
-            a=run_refresh(); rows=_dataset_rows(current_file('runtime-dataset.csv')); summary=_soak_summary(a)
-            print(f'SOAK_REFRESH_{i+1} '+json.dumps(summary,sort_keys=True),flush=True)
-            if previous is not None:
-                pids=previous.get('source_snapshot_ids') or {}; aids=a.get('source_snapshot_ids') or {}
-                comparison={'from_refresh_id':previous.get('refresh_id'),'to_refresh_id':a.get('refresh_id'),'master_hash_equal':pids.get('master_sha256')==aids.get('master_sha256'),'sia_hash_equal':pids.get('sia_sha256')==aids.get('sia_sha256'),'shopify_semantic_hash_equal':pids.get('shopify_semantic_sha256')==aids.get('shopify_semantic_sha256'),'dataset_hash_equal':previous.get('dataset_sha256')==a.get('dataset_sha256'),'blockers_equal':previous.get('blocked')==a.get('blocked'),'xml_rows_equal':previous.get('generated_xml_rows')==a.get('generated_xml_rows')}
-                comparison['row_level_changes']=[] if comparison['dataset_hash_equal'] else _row_changes(previous_rows or {},rows)
-                print(f'SOAK_COMPARISON_{i} '+json.dumps(comparison,sort_keys=True),flush=True)
-            previous=a; previous_rows=rows
-        except Exception as e: print(f'SOAK_REFRESH_{i+1}_FAILED '+repr(e),flush=True)
-        if i+1<count and pause: time.sleep(pause)
-    try:
-        pkg=generate_and_persist_package(); print('PRECUTOVER_PACKAGE '+json.dumps(pkg,sort_keys=True),flush=True)
-    except Exception as e: print('PRECUTOVER_PACKAGE_FAILED '+repr(e),flush=True)
+    time.sleep(initial_delay)
     while True:
-        time.sleep(interval)
         try: print('PERIODIC_REFRESH '+json.dumps(_soak_summary(run_refresh()),sort_keys=True),flush=True)
         except Exception as e: print('refresh failed',repr(e),flush=True)
-threading.Thread(target=bg,daemon=True).start()
+        time.sleep(interval)
+
+def _ensure_bg_started():
+    global _bg_started
+    if _bg_started:return
+    with _bg_start_lock:
+        if _bg_started:return
+        threading.Thread(target=bg,daemon=True,name='runtime-refresh').start()
+        _bg_started=True
+
+@app.before_request
+def _worker_background_start():
+    _ensure_bg_started()
 
 def j(obj,code=200):return Response(json.dumps(obj,indent=2),status=code,mimetype='application/json')
 @app.get('/health')
