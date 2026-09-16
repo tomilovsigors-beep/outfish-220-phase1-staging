@@ -45,12 +45,26 @@ def _soak_summary(a):
     ids=a.get('source_snapshot_ids') or {}
     return {'refresh_id':a.get('refresh_id'),'master_sha256':ids.get('master_sha256'),'sia_sha256':ids.get('sia_sha256'),'shopify_semantic_sha256':ids.get('shopify_semantic_sha256'),'shopify_raw_audit_sha256':ids.get('shopify_raw_audit_sha256'),'dataset_sha256':a.get('dataset_sha256'),'blocked':a.get('blocked'),'generated_xml_rows':a.get('generated_xml_rows'),'runtime_ok':a.get('runtime_ok'),'stock_diffs':a.get('stock_diffs'),'hours_diffs':a.get('hours_diffs'),'price_diffs':a.get('price_diffs')}
 
+def _startup_recover():
+    try:
+        recovered=recover_current_snapshot()
+        if not recovered:
+            print('DURABLE_RECOVERY_NONE no current validated snapshot',flush=True)
+            return None
+        print('DURABLE_RECOVERY '+json.dumps(recovered,sort_keys=True),flush=True)
+        return recovered
+    except Exception as e:
+        print('DURABLE_RECOVERY_NONE '+repr(e),flush=True)
+        return None
+
+# Recovery is intentionally synchronous. Gunicorn does not finish importing this
+# module (and therefore does not expose the worker as ready) until the durable
+# current snapshot has been read back, hash-verified, and restored to runtime state.
+_startup_recovery=_startup_recover()
+
 def bg():
     interval=max(300,int(os.getenv('REFRESH_SECONDS','900')))
     count=max(1,int(os.getenv('STARTUP_SOAK_REFRESHES','3'))); pause=max(0,int(os.getenv('STARTUP_SOAK_PAUSE_SECONDS','10')))
-    try:
-        recovered=recover_current_snapshot(); print('DURABLE_RECOVERY '+json.dumps(recovered,sort_keys=True),flush=True)
-    except Exception as e: print('DURABLE_RECOVERY_NONE '+repr(e),flush=True)
     previous=None; previous_rows=None
     for i in range(count):
         try:
