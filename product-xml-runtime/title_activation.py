@@ -1,15 +1,12 @@
 from __future__ import annotations
 import csv, hashlib, io, json, os
-from collections import defaultdict
 from google.oauth2 import service_account
 from google.auth.transport.requests import AuthorizedSession
 
 MASTER_ID='1xBVjjcLYqiQvy2nLtl-tGt8w_7FWefWxFa2Ltthq-7I'
-MASTER_SHEET_ID=837961277
 SHEET_NAME='MASTER'
 EXPECTED_PREWRITE_HASH='7578c819b95d4069b62ea024a1c415642a7d59331050431f3217b8786ecc93b0'
 EXPECTED_COUNT=663
-CANONICAL_MARKER='LEGACY_PRODUCTION_IDENTITY_CANONICAL'
 DUPLICATE_MARKER='DUPLICATE_MASTER_220_SKU_CONFLICT'
 PROTECTED={'shopify_product_id','shopify_variant_id','shopify_sku','shopify_barcode','220_sku','220_ean','shopify_title','variant_title','vendor','product_type','shopify_status','shopify_price_reference','shopify_main_image_url','220_main_image_url','220_main_image_status','220_status','220_synced','220_product_xml_enabled','220_stock_feed_enabled','220_price_before_discount','220_price_after_discount','price_override_reason','match_status','validation_status','shopify_updated_at','last_sync','notes','220_category_id','220_category_name','220_properties_json','220_length_m','220_height_m','220_width_m','220_manufacturer_code'}
 PRICE_STOCK={'220_status','220_synced','220_product_xml_enabled','220_stock_feed_enabled','220_price_before_discount','220_price_after_discount','price_override_reason','shopify_price_reference','shopify_status','match_status','validation_status'}
@@ -33,7 +30,8 @@ def _rv(row,i):
     v=row[i]
     if isinstance(v,bool): return 'TRUE' if v else 'FALSE'
     return str(v)
-def _hash_matrix(v): return _sha(_jb(v))
+def _normalized(values,width): return [list(r)+['']*(width-len(r)) for r in values]
+def _hash_normalized(values,width): return _sha(_jb(_normalized(values,width)))
 def _col(n):
     s=''
     while n:
@@ -51,19 +49,20 @@ def _persist(db,report,arts):
 def run_title_activation():
     sess=_session(); before=_get(sess)
     if not before: raise RuntimeError('Master empty')
-    headers=[str(x).strip() for x in before[0]]
+    headers=[str(x).strip() for x in before[0]]; width=len(headers)
     need={'220_sku','220_ean','220_title','220_title_candidate','220_title_candidate_status','match_status','220_status'}
     if not need.issubset(headers): raise RuntimeError('required title activation columns missing')
     h={x:i for i,x in enumerate(headers)}
-    current_hash=_hash_matrix(before)
+    current_hash=_hash_normalized(before,width)
     if current_hash!=EXPECTED_PREWRITE_HASH: raise RuntimeError(f'Master hash mismatch {current_hash} != {EXPECTED_PREWRITE_HASH}')
-    row_count=len(before); identity_before=[(_rv(before[r],h['220_sku']),_rv(before[r],h['220_ean'])) for r in range(1,row_count)]
-    protected={x:[_rv(before[r],h[x]) for r in range(row_count)] for x in headers if x in PROTECTED}
-    blocked_rows=[r+1 for r in range(1,row_count) if _rv(before[r],h['match_status'])==DUPLICATE_MARKER]
-    blocked_before={rn:list(before[rn-1]) for rn in blocked_rows}
+    bn=_normalized(before,width); row_count=len(bn)
+    identity_before=[(_rv(bn[r],h['220_sku']),_rv(bn[r],h['220_ean'])) for r in range(1,row_count)]
+    protected={x:[_rv(bn[r],h[x]) for r in range(row_count)] for x in headers if x in PROTECTED}
+    blocked_rows=[r+1 for r in range(1,row_count) if _rv(bn[r],h['match_status'])==DUPLICATE_MARKER]
+    blocked_before={rn:list(bn[rn-1]) for rn in blocked_rows}
     auto=[]; review=0; nonempty_conflicts=[]
     for ri in range(1,row_count):
-        rn=ri+1; row=before[ri]
+        rn=ri+1; row=bn[ri]
         status=_rv(row,h['220_title_candidate_status']).strip(); title=_rv(row,h['220_title']).strip(); cand=_rv(row,h['220_title_candidate']).strip(); match=_rv(row,h['match_status']).strip(); life=_rv(row,h['220_status']).strip()
         if status=='REVIEW_REQUIRED': review+=1
         if status!='AUTO_APPROVABLE': continue
@@ -76,30 +75,27 @@ def run_title_activation():
     if len({(x['220_sku'],x['220_ean']) for x in auto})!=EXPECTED_COUNT: raise RuntimeError('title target identities not unique')
     dry_hash=_sha(_csv(auto,['row','220_sku','220_ean','before','after']))
     run_hash=_sha((EXPECTED_PREWRITE_HASH+dry_hash).encode())
-    # final read immediately before write
     pre=_get(sess)
-    if _hash_matrix(pre)!=EXPECTED_PREWRITE_HASH: raise RuntimeError('Master changed between title preflight and write')
+    if _hash_normalized(pre,width)!=EXPECTED_PREWRITE_HASH: raise RuntimeError('Master changed between title preflight and write')
     title_col=_col(h['220_title']+1)
     data=[{'range':f'{SHEET_NAME}!{title_col}{x["row"]}','values':[[x['after']]]} for x in auto]
     url=f'https://sheets.googleapis.com/v4/spreadsheets/{MASTER_ID}/values:batchUpdate'
     r=sess.post(url,json={'valueInputOption':'RAW','data':data},timeout=180)
     if not r.ok: raise RuntimeError(f'title batch write failed {r.status_code}: {(r.text or "")[:2000]}')
-    after=_get(sess)
+    after=_get(sess); an=_normalized(after,width)
     failures=[]
     for x in auto:
-        got=_rv(after[x['row']-1],h['220_title'])
+        got=_rv(an[x['row']-1],h['220_title'])
         if got!=x['after']: failures.append({**x,'readback':got})
-    identity_after=[(_rv(after[r],h['220_sku']),_rv(after[r],h['220_ean'])) for r in range(1,len(after))]
+    identity_after=[(_rv(an[r],h['220_sku']),_rv(an[r],h['220_ean'])) for r in range(1,len(an))]
     protected_changed=[]
     for col,vals0 in protected.items():
-        vals1=[_rv(after[r],h[col]) for r in range(len(after))]
+        vals1=[_rv(an[r],h[col]) for r in range(len(an))]
         if vals1!=vals0: protected_changed.append(col)
-    blocked_touched=[]
-    for rn,brow in blocked_before.items():
-        if rn>len(after) or list(after[rn-1])!=brow: blocked_touched.append(rn)
-    verified=(not failures and identity_after==identity_before and not protected_changed and not blocked_touched and len(after)==row_count)
-    post_hash=_hash_matrix(after)
-    report={'status':'PASS' if verified else 'FAIL','run_hash':run_hash,'master_id':MASTER_ID,'prewrite_master_hash':EXPECTED_PREWRITE_HASH,'postwrite_master_hash':post_hash,'title_expected':EXPECTED_COUNT,'title_written':EXPECTED_COUNT-len(failures),'title_verified':EXPECTED_COUNT-len(failures),'title_review_remaining':review,'readback_failures':len(failures),'blocked_duplicate_rows_touched':len(blocked_touched),'protected_fields_changed':len(protected_changed),'protected_fields_changed_names':protected_changed,'identity_fields_changed':0 if identity_after==identity_before else 1,'stock_price_fields_changed':len([x for x in protected_changed if x in PRICE_STOCK]),'row_count_before':row_count,'row_count_after':len(after),'dry_run_hash':dry_hash}
+    blocked_touched=[rn for rn,brow in blocked_before.items() if rn>len(an) or list(an[rn-1])!=brow]
+    verified=(not failures and identity_after==identity_before and not protected_changed and not blocked_touched and len(an)==row_count)
+    post_hash=_sha(_jb(an))
+    report={'status':'PASS' if verified else 'FAIL','run_hash':run_hash,'master_id':MASTER_ID,'prewrite_master_hash':EXPECTED_PREWRITE_HASH,'postwrite_master_hash':post_hash,'title_expected':EXPECTED_COUNT,'title_written':EXPECTED_COUNT-len(failures),'title_verified':EXPECTED_COUNT-len(failures),'title_review_remaining':review,'readback_failures':len(failures),'blocked_duplicate_rows_touched':len(blocked_touched),'protected_fields_changed':len(protected_changed),'protected_fields_changed_names':protected_changed,'identity_fields_changed':0 if identity_after==identity_before else 1,'stock_price_fields_changed':len([x for x in protected_changed if x in PRICE_STOCK]),'row_count_before':row_count,'row_count_after':len(an),'dry_run_hash':dry_hash}
     arts={'title-activation-dry-run.csv':_csv(auto,['row','220_sku','220_ean','before','after']),'title-activation-rollback.csv':_csv([{'row':x['row'],'220_sku':x['220_sku'],'220_ean':x['220_ean'],'field':'220_title','before':''} for x in auto],['row','220_sku','220_ean','field','before']),'title-activation-failures.csv':_csv(failures,['row','220_sku','220_ean','before','after','readback']) if failures else b'row,220_sku,220_ean,before,after,readback\r\n','title-activation-report.json':_jb(report)}
     _persist(os.getenv('DATABASE_URL'),report,arts)
     return report,arts
