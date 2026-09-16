@@ -1,7 +1,8 @@
-import csv, json, os, threading, time
+import csv, io, json, os, threading, time
 import requests
 from flask import Flask, Response, send_file
 from runtime import refresh,current_state,current_file,recover_current_snapshot
+from precutover import generate_and_persist_package,load_current_package
 app=Flask(__name__)
 
 _token_lock=threading.RLock(); _token_expires_at=0.0
@@ -62,6 +63,9 @@ def bg():
             previous=a; previous_rows=rows
         except Exception as e: print(f'SOAK_REFRESH_{i+1}_FAILED '+repr(e),flush=True)
         if i+1<count and pause: time.sleep(pause)
+    try:
+        pkg=generate_and_persist_package(); print('PRECUTOVER_PACKAGE '+json.dumps(pkg,sort_keys=True),flush=True)
+    except Exception as e: print('PRECUTOVER_PACKAGE_FAILED '+repr(e),flush=True)
     while True:
         time.sleep(interval)
         try: print('PERIODIC_REFRESH '+json.dumps(_soak_summary(run_refresh()),sort_keys=True),flush=True)
@@ -82,6 +86,18 @@ def source_status():
 @app.get('/snapshot-manifest')
 def manifest():
     s=current_state(); return j(s.get('manifest') or {},200 if s.get('validated_dir') else 503)
+@app.get('/precutover-summary')
+def precutover_summary():
+    try:
+        p=load_current_package(); return j({'package_id':p['package_id'],'zip_sha256':p['zip_sha256'],**p['summary']},200) if p else j({'error':'no pre-cutover package yet'},404)
+    except Exception as e:return j({'error':f'{type(e).__name__}: {e}'},503)
+@app.get('/precutover-package.zip')
+def precutover_zip():
+    try:
+        p=load_current_package()
+        if not p:return j({'error':'no pre-cutover package yet'},404)
+        return send_file(io.BytesIO(p['zip_content']),mimetype='application/zip',as_attachment=True,download_name='precutover-comparison-package.zip',conditional=False,max_age=0)
+    except Exception as e:return j({'error':f'{type(e).__name__}: {e}'},503)
 def serve(name,mime):
     p=current_file(name)
     if not p:return j({'error':'no validated durable snapshot available','service_status':current_state()['service_status']},503)
