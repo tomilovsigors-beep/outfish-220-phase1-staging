@@ -47,19 +47,28 @@ def _shopify_token():
 def _shopify_products(master_rows):
     ids=sorted({str(r.get('shopify_product_id') or '').strip() for r in master_rows if str(r.get('shopify_product_id') or '').strip() and str(r.get('shopify_variant_id') or '').strip()})
     token=_shopify_token(); shop=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
-    query='''query ProductXmlSource($ids:[ID!]!){nodes(ids:$ids){... on Product{id title description vendor productType status category{id fullName} featuredMedia{... on MediaImage{image{url}}}}}}'''
+    query='''query ProductXmlSourceV2($ids:[ID!]!){nodes(ids:$ids){... on Product{id title description vendor productType status category{id fullName} media(first:20){nodes{... on MediaImage{mimeType image{url width height}}}} variants(first:100){nodes{id title selectedOptions{name value} inventoryItem{measurement{weight{value unit}}}}}}}}'''
     out={}
     for i in range(0,len(ids),50):
         batch=ids[i:i+50]
-        r=requests.post(f'https://{shop}/admin/api/2026-07/graphql.json',headers={'X-Shopify-Access-Token':token,'Content-Type':'application/json'},json={'query':query,'variables':{'ids':batch}},timeout=60)
+        r=requests.post(f'https://{shop}/admin/api/2026-07/graphql.json',headers={'X-Shopify-Access-Token':token,'Content-Type':'application/json'},json={'query':query,'variables':{'ids':batch}},timeout=90)
         r.raise_for_status(); payload=r.json()
-        if payload.get('errors'): raise RuntimeError('Shopify GraphQL errors: '+json.dumps(payload['errors'])[:1000])
+        if payload.get('errors'): raise RuntimeError('Shopify GraphQL errors: '+json.dumps(payload['errors'])[:1500])
         nodes=(payload.get('data') or {}).get('nodes') or []
         if len(nodes)!=len(batch): raise RuntimeError('Shopify product source batch incomplete')
         for expected,node in zip(batch,nodes):
             if not node or node.get('id')!=expected: raise RuntimeError(f'Shopify product missing/mismatch {expected}')
-            media=node.get('featuredMedia') or {}; image=(media.get('image') or {}).get('url','')
             cat=node.get('category') or {}
+            images=[]
+            for media in (node.get('media') or {}).get('nodes') or []:
+                image=(media or {}).get('image') or {}
+                url=str(image.get('url') or '')
+                if not url: continue
+                images.append({'url':url,'mime_type':media.get('mimeType') or '','width':image.get('width'),'height':image.get('height')})
+            variants={}
+            for v in (node.get('variants') or {}).get('nodes') or []:
+                weight=(((v.get('inventoryItem') or {}).get('measurement') or {}).get('weight') or {})
+                variants[v['id']]={'id':v['id'],'title':v.get('title') or '','selected_options':v.get('selectedOptions') or [],'weight':{'value':weight.get('value'),'unit':weight.get('unit')} if weight else {}}
             out[expected]={
                 'title':node.get('title') or '',
                 'description':node.get('description') or '',
@@ -68,19 +77,28 @@ def _shopify_products(master_rows):
                 'status':node.get('status') or '',
                 'category_id':cat.get('id') or '',
                 'category_name':cat.get('fullName') or '',
-                'main_image_url':image or '',
+                'main_image_url':images[0]['url'] if images else '',
+                'images':images,
+                'variants_by_id':variants,
+                # These two PHH image checks are intentionally fail-closed until separately verified.
+                'images_direct_no_redirect_verified':False,
+                'main_background_verified':False,
             }
     return out
 
 
-def _phh_spec():
-    p=ROOT/'phh-spec.json'
-    return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {'authoritative':False}
+def _load_json(name):
+    p=ROOT/name
+    return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
 
 
 def refresh():
     try:
-        master=_master_rows(); shopify=_shopify_products(master); artifacts=build(master,shopify,_phh_spec())
+        master=_master_rows()
+        shopify=_shopify_products(master)
+        category_mapping=_load_json('phh-category-mapping.json')
+        category_fields=_load_json('phh-category-fields.json')
+        artifacts=build(master,shopify,category_mapping,category_fields)
         validation=json.loads(artifacts['product-xml-validation.json'].decode())
         with STATE_LOCK:
             STATE.update(status='ok' if validation.get('publish_gate')=='PASS' else 'blocked',error=None,last_refresh=time.time(),artifacts=artifacts,validation=validation)
