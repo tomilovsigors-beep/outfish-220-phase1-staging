@@ -4,8 +4,9 @@ from flask import Flask, Response
 from app import _master_rows, _shopify_products, _load_json
 from generator import build
 from content_runtime import build_snapshot, persist_snapshot
+from master_bulk_write import run_controlled_master_write, EXPECTED_DATASET_HASH
 
-app=Flask(__name__); LOCK=threading.RLock(); STATE={'status':'starting','error':None,'last_refresh':None,'summary':{},'artifacts':{},'product_xml_validation':{},'persistence_ok':False,'persistence_error':None,'recovered_from_postgres':False}
+app=Flask(__name__); LOCK=threading.RLock(); STATE={'status':'starting','error':None,'last_refresh':None,'summary':{},'artifacts':{},'product_xml_validation':{},'persistence_ok':False,'persistence_error':None,'recovered_from_postgres':False,'master_write':None}
 def _json(o,status=200): return Response(json.dumps(o,indent=2,sort_keys=True),status=status,mimetype='application/json')
 def refresh():
     try:
@@ -81,6 +82,14 @@ def title_qa(): return _artifact('title-qa.csv','text/csv')
 def blockers(): return _artifact('content-blockers.csv','text/csv')
 @app.get('/master-bulk-write-proposal.csv')
 def proposal(): return _artifact('master-bulk-write-proposal.csv','text/csv')
+@app.get('/master-bulk-write-report.json')
+def write_report(): return _artifact('master-bulk-write-report.json','application/json')
+@app.get('/master-bulk-write-dry-run.csv')
+def write_dry(): return _artifact('master-bulk-write-dry-run.csv','text/csv')
+@app.get('/master-bulk-write-rollback.csv')
+def write_rollback(): return _artifact('master-bulk-write-rollback.csv','text/csv')
+@app.get('/master-bulk-write-failures.csv')
+def write_failures(): return _artifact('master-bulk-write-failures.csv','text/csv')
 @app.get('/product-xml-validation.json')
 def validation(): return _artifact('product-xml-validation.json','application/json')
 @app.get('/product-xml-readiness.csv')
@@ -95,9 +104,25 @@ def _selftest_recovered_routes():
     with app.test_client() as c: statuses={p:c.get(p).status_code for p in paths}
     print('CONTENT_RECOVERY_ENDPOINT_SELFTEST',json.dumps({'statuses':statuses,'pass':all(v==200 for v in statuses.values()),'dataset_hash':STATE['summary'].get('dataset_hash')},sort_keys=True),flush=True)
 
+def _maybe_run_master_write():
+    flag=os.getenv('RUN_CONTROLLED_MASTER_WRITE','').strip()
+    if flag!=EXPECTED_DATASET_HASH: return
+    try:
+        with LOCK: arts=dict(STATE['artifacts']); summ=dict(STATE['summary'])
+        report,newarts=run_controlled_master_write(arts,summ)
+        with LOCK:
+            STATE['artifacts'].update(newarts); STATE['master_write']=report
+        print('CONTROLLED_MASTER_WRITE_RESULT',json.dumps(report,sort_keys=True),flush=True)
+    except Exception as e:
+        with LOCK: STATE['master_write']={'status':'ERROR','error':f'{type(e).__name__}: {e}'}
+        print('CONTROLLED_MASTER_WRITE_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
     print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in ('GOOGLE_SERVICE_ACCOUNT_JSON','SHOPIFY_CLIENT_ID','SHOPIFY_CLIENT_SECRET','DATABASE_URL')},sort_keys=True),flush=True)
-    if _restore_latest(): _selftest_recovered_routes(); return
-    try: refresh()
+    restored=_restore_latest()
+    if restored:
+        _selftest_recovered_routes(); _maybe_run_master_write(); return
+    try:
+        refresh(); _maybe_run_master_write()
     except Exception: pass
 threading.Thread(target=_boot,daemon=True).start()
