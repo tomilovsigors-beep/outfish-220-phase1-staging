@@ -129,7 +129,17 @@ def _boot():
     print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in ('GOOGLE_SERVICE_ACCOUNT_JSON','SHOPIFY_CLIENT_ID','SHOPIFY_CLIENT_SECRET','DATABASE_URL')},sort_keys=True),flush=True)
     restored=_restore_latest()
     if restored:
-        _selftest_recovered_routes(); _maybe_run_master_write(); return
-    try: refresh(); _maybe_run_master_write()
+        _selftest_recovered_routes()
+        if os.getenv('RUN_READINESS_REFRESH','').strip()=='1':
+            try:
+                refresh()
+                with LOCK:
+                    v=dict(STATE.get('product_xml_validation') or {}); s=dict(STATE.get('summary') or {})
+                print('PRODUCT_XML_READINESS_REFRESH',json.dumps({'publish_gate':v.get('publish_gate'),'ready':v.get('ready_count',v.get('ready')),'blocked':v.get('blocked_count',v.get('blocked')),'dataset_hash':s.get('dataset_hash'),'projected_product_xml_ready':s.get('projected_product_xml_ready')},sort_keys=True),flush=True)
+            except Exception as e:
+                print('PRODUCT_XML_READINESS_REFRESH_FAILED',type(e).__name__,str(e),flush=True)
+        _maybe_run_master_write(); return
+    try:
+        refresh(); _maybe_run_master_write()
     except Exception: pass
 threading.Thread(target=_boot,daemon=True).start()
