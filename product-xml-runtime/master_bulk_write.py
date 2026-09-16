@@ -7,6 +7,7 @@ from google.auth.transport.requests import AuthorizedSession
 EXPECTED_DATASET_HASH='a4465570311f9ae08e9733cd2fe9349ca0ece6f3bf6438f07de70fa4281ee3d7'
 EXPECTED_PROPOSAL_HASH='e79674e5351c4d8f0d78a91e43994db205900139dd35cebc630eb2afecde34c0'
 MASTER_ID='1xBVjjcLYqiQvy2nLtl-tGt8w_7FWefWxFa2Ltthq-7I'
+MASTER_SHEET_ID=837961277
 SHEET_NAME='MASTER'
 EXPECTED_PROPOSAL_ROWS=4825
 EXPECTED_IDENTITIES=1003
@@ -40,7 +41,8 @@ def _session():
 def _get_values(sess):
     rng=f"{SHEET_NAME}!A1:ZZ5000"
     url=f'https://sheets.googleapis.com/v4/spreadsheets/{MASTER_ID}/values/{rng}'
-    r=sess.get(url,params={'majorDimension':'ROWS','valueRenderOption':'UNFORMATTED_VALUE'},timeout=60); r.raise_for_status()
+    r=sess.get(url,params={'majorDimension':'ROWS','valueRenderOption':'UNFORMATTED_VALUE'},timeout=60)
+    if not r.ok: raise RuntimeError(f'Sheets read failed {r.status_code}: {(r.text or "")[:1000]}')
     return (r.json().get('values') or [])
 
 def _hash_matrix(values): return _sha(_json_bytes(values))
@@ -51,10 +53,18 @@ def _row_value(row,idx):
     if isinstance(v,bool): return 'TRUE' if v else 'FALSE'
     return str(v)
 
-def _batch_values(sess,data):
+def _ensure_grid_columns(sess,add_count):
+    if add_count<=0: return
+    url=f'https://sheets.googleapis.com/v4/spreadsheets/{MASTER_ID}:batchUpdate'
+    body={'requests':[{'appendDimension':{'sheetId':MASTER_SHEET_ID,'dimension':'COLUMNS','length':add_count}}]}
+    r=sess.post(url,json=body,timeout=60)
+    if not r.ok: raise RuntimeError(f'grid expansion failed {r.status_code}: {(r.text or "")[:1500]}')
+
+def _batch_values_atomic(sess,data):
     url=f'https://sheets.googleapis.com/v4/spreadsheets/{MASTER_ID}/values:batchUpdate'
-    for i in range(0,len(data),400):
-        r=sess.post(url,json={'valueInputOption':'RAW','data':data[i:i+400]},timeout=90); r.raise_for_status()
+    r=sess.post(url,json={'valueInputOption':'RAW','data':data},timeout=180)
+    if not r.ok: raise RuntimeError(f'values batch failed {r.status_code}: {(r.text or "")[:2000]}')
+    return r.json()
 
 def _persist_run(db,report,artifacts):
     import psycopg
@@ -84,6 +94,7 @@ def run_controlled_master_write(content_artifacts,summary):
 
     sess=_session(); before=_get_values(sess)
     if not before: raise RuntimeError('Master empty')
+    source_values_hash=_hash_matrix(before)
     headers=[str(x).strip() for x in before[0]]
     required={'220_sku','220_ean','match_status','220_status'}
     if not required.issubset(set(headers)): raise RuntimeError('Master required identity/marker columns missing')
@@ -131,18 +142,25 @@ def run_controlled_master_write(content_artifacts,summary):
         if old==val: already.append(rec)
         elif old!='': conflicts.append(rec)
         else: writes.append(rec); diff.append(rec); rollback.append({'row':rn,'220_sku':sku,'220_ean':ean,'field':field,'before':old})
-    dry={'proposal_cells':len(proposal),'identities':len(identities),'to_write':len(writes),'already_equal':len(already),'conflicts':len(conflicts),'missing_headers':missing_headers,'identity_missing':len(missing),'duplicate_identities_resolved':len(duplicate_resolutions),'ambiguous_identities':len(ambiguous),'blocked_duplicate_rows_targeted':sum(1 for w in writes if w['row'] in blocked_rows),'proposal_hash':proposal_hash,'dataset_hash':dataset_hash,'target_spreadsheet_id':MASTER_ID,'before_master_hash':before_master_hash}
+    dry={'proposal_cells':len(proposal),'identities':len(identities),'to_write':len(writes),'already_equal':len(already),'conflicts':len(conflicts),'missing_headers':missing_headers,'identity_missing':len(missing),'duplicate_identities_resolved':len(duplicate_resolutions),'ambiguous_identities':len(ambiguous),'blocked_duplicate_rows_targeted':sum(1 for w in writes if w['row'] in blocked_rows),'proposal_hash':proposal_hash,'dataset_hash':dataset_hash,'target_spreadsheet_id':MASTER_ID,'before_master_hash':before_master_hash,'source_values_hash':source_values_hash}
     if len(writes)!=EXPECTED_PROPOSAL_ROWS or already or conflicts or dry['blocked_duplicate_rows_targeted']!=0:
         report={'status':'DRY_RUN_BLOCKED','dataset_hash':dataset_hash,'proposal_hash':proposal_hash,'dry_run':dry,'cells_written':0,'identities_affected':0,'protected_fields_changed':0,'identity_fields_changed':0,'stock_price_fields_changed':0,'post_write_verification':'NOT_RUN'}
         arts={'master-bulk-write-dry-run.csv':_csv_bytes(diff,['row','220_sku','220_ean','field','before','after','source','write_class']),'master-bulk-write-rollback.csv':_csv_bytes(rollback,['row','220_sku','220_ean','field','before']),'master-bulk-write-duplicate-resolution.csv':_csv_bytes(duplicate_resolutions,['220_sku','220_ean','canonical_row','blocked_rows']),'master-bulk-write-report.json':_json_bytes(report)}
         _persist_run(os.getenv('DATABASE_URL'),report,arts); return report,arts
+
+    # Structural schema expansion only; then re-read and verify all existing values are still identical before any content value write.
+    _ensure_grid_columns(sess,len(missing_headers))
+    prewrite=_get_values(sess)
+    if _hash_matrix(prewrite)!=source_values_hash:
+        raise RuntimeError('Master values changed between preflight and write; aborting before content write')
 
     data=[]
     for f in missing_headers:
         c=hidx[f]+1; data.append({'range':f'{SHEET_NAME}!{_col_letter(c)}1','values':[[f]]})
     for w in writes:
         c=hidx[w['field']]+1; data.append({'range':f"{SHEET_NAME}!{_col_letter(c)}{w['row']}",'values':[[w['after']]]})
-    _batch_values(sess,data)
+    if len(data)!=(len(missing_headers)+EXPECTED_PROPOSAL_ROWS): raise RuntimeError('atomic payload count mismatch')
+    _batch_values_atomic(sess,data)
 
     after=_get_values(sess)
     after_norm=[list(r)+['']*(col_count-len(r)) for r in after]
