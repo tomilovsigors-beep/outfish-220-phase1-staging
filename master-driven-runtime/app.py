@@ -3,6 +3,7 @@ import requests
 from flask import Flask, Response, send_file
 from runtime import refresh,current_state,current_file,recover_current_snapshot
 from precutover import generate_and_persist_package,load_current_package
+from price_impact_audit import run_price_impact_audit
 app=Flask(__name__)
 
 _token_lock=threading.RLock(); _token_expires_at=0.0
@@ -98,6 +99,11 @@ def precutover_zip():
         if not p:return j({'error':'no pre-cutover package yet'},404)
         return send_file(io.BytesIO(p['zip_content']),mimetype='application/zip',as_attachment=True,download_name='precutover-comparison-package.zip',conditional=False,max_age=0)
     except Exception as e:return j({'error':f'{type(e).__name__}: {e}'},503)
+@app.get('/price-impact-audit')
+def price_impact_audit():
+    try:
+        out=run_price_impact_audit(); return j(out,200 if out.get('gate')=='PASS' else 409)
+    except Exception as e:return j({'gate':'ERROR','error':f'{type(e).__name__}: {e}'},503)
 def serve(name,mime):
     p=current_file(name)
     if not p:return j({'error':'no validated durable snapshot available','service_status':current_state()['service_status']},503)
