@@ -1,4 +1,4 @@
-import json, os, threading, time
+import csv, io, json, os, threading, time
 import requests
 from flask import Flask, Response, send_file
 import compact_loader
@@ -52,12 +52,43 @@ def run_refresh():
     ensure_shopify_access_token()
     return refresh()
 
+def _dataset_rows(path):
+    if not path:return {}
+    with open(path,'r',encoding='utf-8-sig',newline='') as f:
+        return {r.get('220_sku',''):r for r in csv.DictReader(f)}
+
+def _row_changes(a,b):
+    keys=sorted(set(a)|set(b)); out=[]
+    for sku in keys:
+        ra=a.get(sku); rb=b.get(sku)
+        if ra==rb: continue
+        if ra is None or rb is None:
+            out.append({'220_sku':sku,'change':'added' if rb else 'removed'})
+            continue
+        fields=sorted(set(ra)|set(rb)); delta={k:{'before':ra.get(k,''),'after':rb.get(k,'')} for k in fields if ra.get(k,'')!=rb.get(k,'')}
+        out.append({'220_sku':sku,'fields':delta})
+    return out
+
 def bg():
     interval=max(300,int(os.getenv('REFRESH_SECONDS','900')))
+    try:
+        a1=run_refresh(); p1=current_file('runtime-dataset.csv'); rows1=_dataset_rows(p1)
+        print('VALIDATION_REFRESH_1 '+json.dumps(a1,sort_keys=True),flush=True)
+        a2=run_refresh(); p2=current_file('runtime-dataset.csv'); rows2=_dataset_rows(p2)
+        print('VALIDATION_REFRESH_2 '+json.dumps(a2,sort_keys=True),flush=True)
+        comparison={'dataset_hash_equal':a1.get('dataset_sha256')==a2.get('dataset_sha256'),'dataset_sha256_1':a1.get('dataset_sha256'),'dataset_sha256_2':a2.get('dataset_sha256'),'source_snapshot_ids_1':a1.get('source_snapshot_ids'),'source_snapshot_ids_2':a2.get('source_snapshot_ids')}
+        if not comparison['dataset_hash_equal']:
+            comparison['row_level_changes']=_row_changes(rows1,rows2)
+        else:
+            comparison['row_level_changes']=[]
+        print('VALIDATION_REFRESH_COMPARISON '+json.dumps(comparison,sort_keys=True),flush=True)
+    except Exception as e:
+        print('VALIDATION_REFRESH_FAILED '+repr(e),flush=True)
     while True:
-        try: run_refresh()
-        except Exception as e: print('refresh failed',repr(e),flush=True)
         time.sleep(interval)
+        try:
+            a=run_refresh(); print('PERIODIC_REFRESH '+json.dumps(a,sort_keys=True),flush=True)
+        except Exception as e: print('refresh failed',repr(e),flush=True)
 threading.Thread(target=bg,daemon=True).start()
 
 def j(obj,code=200):return Response(json.dumps(obj,indent=2),status=code,mimetype='application/json')
