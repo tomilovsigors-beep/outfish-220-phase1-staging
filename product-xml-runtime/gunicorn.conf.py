@@ -7,6 +7,10 @@ def on_starting(server):
         email=info.get('client_email')
         if email:
             server.log.info('GOOGLE_SERVICE_ACCOUNT_PRINCIPAL %s', email)
+        if os.getenv('RUN_TITLE_ACTIVATION','').strip()=='APPROVED':
+            from title_activation import run_title_activation
+            report,_=run_title_activation()
+            server.log.info('TITLE_ACTIVATION_RESULT %s',json.dumps(report,sort_keys=True))
         if os.getenv('RUN_IDENTITY_DUP_DIAG','')!='1':
             return
         import psycopg
@@ -34,4 +38,4 @@ def on_starting(server):
         dups=[{'220_sku':sku,'220_ean':ean,'rows':rows} for (sku,ean),rows in sorted(idmap.items()) if len(rows)>1]
         server.log.info('MASTER_IDENTITY_DUP_DIAG %s',json.dumps({'proposal_identities':len(proposal),'duplicate_identities':len(dups),'duplicates':dups},sort_keys=True))
     except Exception as exc:
-        server.log.warning('MASTER_IDENTITY_DUP_DIAG_ERROR %s %s', type(exc).__name__, str(exc)[:1000])
+        server.log.warning('STARTUP_DIAG_OR_TITLE_ERROR %s %s', type(exc).__name__, str(exc)[:2000])
