@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, os, threading, time
+import json, os, threading, time, traceback
 from flask import Flask, Response
 from app import _master_rows, _shopify_products, _load_json
 from generator import build
@@ -13,9 +13,12 @@ def refresh():
         xml_arts=build(master,shopify,_load_json('phh-category-mapping.json'),_load_json('phh-category-fields.json')); validation=json.loads(xml_arts['product-xml-validation.json'].decode())
         arts=dict(xml_arts); arts.update(content_arts); ok,perr=persist_snapshot(os.getenv('DATABASE_URL'),content_arts,summary)
         with LOCK: STATE.update(status='blocked' if validation.get('publish_gate')!='PASS' else 'ok',error=None,last_refresh=time.time(),summary=summary,artifacts=arts,product_xml_validation=validation,persistence_ok=ok,persistence_error=perr)
+        print('CONTENT_SNAPSHOT_READY',json.dumps({'safe_mappings_fetched':summary.get('safe_mappings_fetched'),'dataset_hash':summary.get('dataset_hash'),'persistence_ok':ok,'persistence_error':perr},sort_keys=True),flush=True)
         return summary
     except Exception as e:
         with LOCK: STATE.update(status='degraded',error=f'{type(e).__name__}: {e}',last_refresh=time.time())
+        print('CONTENT_SNAPSHOT_REFRESH_FAILED',type(e).__name__,str(e),flush=True)
+        traceback.print_exc()
         raise
 def _artifact(n,m):
     with LOCK: b=STATE['artifacts'].get(n); status=STATE['status']; err=STATE['error']
@@ -24,6 +27,7 @@ def _artifact(n,m):
 @app.get('/health')
 def health():
     with LOCK: x={k:v for k,v in STATE.items() if k!='artifacts'}
+    x['env_status']={k:bool(os.getenv(k)) for k in ('GOOGLE_SERVICE_ACCOUNT_JSON','SHOPIFY_CLIENT_ID','SHOPIFY_CLIENT_SECRET','DATABASE_URL')}
     code=200 if x['status'] in {'ok','blocked'} and x['persistence_ok'] else 503
     return _json(x,code)
 @app.post('/refresh')
@@ -56,6 +60,7 @@ def xml_blockers(): return _artifact('product-xml-blockers.csv','text/csv')
 def xml(): return _artifact('product-xml-dry-run.xml','application/xml')
 
 def _boot():
+    print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in ('GOOGLE_SERVICE_ACCOUNT_JSON','SHOPIFY_CLIENT_ID','SHOPIFY_CLIENT_SECRET','DATABASE_URL')},sort_keys=True),flush=True)
     try: refresh()
     except Exception: pass
 threading.Thread(target=_boot,daemon=True).start()
