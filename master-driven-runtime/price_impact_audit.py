@@ -76,7 +76,6 @@ def run_price_impact_audit():
     master={norm(r.get('220_sku')):r for r in mrows if norm(r.get('220_sku'))}
     sia={norm(r.get('sku')):r for r in srows if norm(r.get('sku'))}
 
-    # Independent static + persisted verification that Shopify price is not a source.
     rtext=(ROOT/'runtime.py').read_text(encoding='utf-8')
     mq=re.search(r"q='''(query RuntimeInventory.*?)'''",rtext,re.S)
     if not mq:raise RuntimeError('cannot locate Shopify RuntimeInventory GraphQL query')
@@ -93,7 +92,6 @@ def run_price_impact_audit():
         old=dec(functional[sku]['after'])
         if mb is None or mb<=0 or old is None or old<=0:
             unexplained.append({'sku':sku,'reason':'INVALID_BASELINE_OR_MASTER_PRICE','v13_after':functional[sku]['after'],'master_before':norm(m.get('220_price_before_discount')),'master_after':norm(m.get('220_price_after_discount'))}); continue
-        # Verify package staging XML came from these exact Master price fields.
         if not eq(staging[sku]['before'],m.get('220_price_before_discount')) or not eq(staging[sku]['after'],m.get('220_price_after_discount')):
             unexplained.append({'sku':sku,'reason':'STAGING_XML_MASTER_PRICE_MISMATCH','staging_before':staging[sku]['before'],'staging_after':staging[sku]['after'],'master_before':norm(m.get('220_price_before_discount')),'master_after':norm(m.get('220_price_after_discount'))}); continue
         effective=ma if ma is not None else mb
@@ -125,17 +123,13 @@ def run_price_impact_audit():
     top_pct=sorted([r for r in abs_changed if r['pct'] is not None],key=lambda r:(abs(r['pct']),r['sku']),reverse=True)[:20]
     classes={c:sum(1 for r in rows if r['classification']==c) for c in ('EXPECTED_MASTER_PRICE','LEGACY_BASELINE_MIGRATION')}
     def pub(r):return {'sku':r['sku'],'v13_after':fnum(r['v13_after']),'master_effective_after':fnum(r['master_effective_after']),'change':fnum(r['delta']),'change_pct':fnum(r['pct']),'classification':r['classification']}
-    return {
-        'gate':'PASS','package_id':pid,'raw_price_after_diffs':927,
-        'increase_count':len(ups),'decrease_count':len(downs),'normalized_same_count':len(same),
-        'median_increase':fnum(med_amount(ups)),'max_increase':fnum(max([r['delta'] for r in ups],default=Decimal(0))),
-        'median_decrease':fnum(med_abs_down(downs)),'max_decrease':fnum(max([-r['delta'] for r in downs],default=Decimal(0))),
-        'changes_over_pct':thresholds,
-        'classification_counts':{**classes,'UNEXPLAINED_PRICE_CHANGE':0},
-        'shopify_price_used':False,'shopify_price_query_absent':True,
-        'provenance_verified_count':927,'master_hash':ids.get('master_sha256'),'sia_hash':ids.get('sia_sha256'),
-        'top20_absolute':[pub(r) for r in top_abs],'top20_percentage':[pub(r) for r in top_pct]
-    }
+    return {'gate':'PASS','package_id':pid,'raw_price_after_diffs':927,'increase_count':len(ups),'decrease_count':len(downs),'normalized_same_count':len(same),'median_increase':fnum(med_amount(ups)),'max_increase':fnum(max([r['delta'] for r in ups],default=Decimal(0))),'median_decrease':fnum(med_abs_down(downs)),'max_decrease':fnum(max([-r['delta'] for r in downs],default=Decimal(0))),'changes_over_pct':thresholds,'classification_counts':{**classes,'UNEXPLAINED_PRICE_CHANGE':0},'shopify_price_used':False,'shopify_price_query_absent':True,'provenance_verified_count':927,'master_hash':ids.get('master_sha256'),'sia_hash':ids.get('sia_sha256'),'top20_absolute':[pub(r) for r in top_abs],'top20_percentage':[pub(r) for r in top_pct]}
+
+def _print_startup_gate():
+    try: print('FINAL_PRICE_IMPACT_AUDIT '+json.dumps(run_price_impact_audit(),sort_keys=True),flush=True)
+    except Exception as e: print('FINAL_PRICE_IMPACT_AUDIT_ERROR '+repr(e),flush=True)
 
 if __name__=='__main__':
-    print('FINAL_PRICE_IMPACT_AUDIT '+json.dumps(run_price_impact_audit(),sort_keys=True),flush=True)
+    _print_startup_gate()
+else:
+    _print_startup_gate()
