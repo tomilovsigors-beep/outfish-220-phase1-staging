@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, os, threading, time, traceback
+import csv, io, json, os, threading, time, traceback
 from flask import Flask, Response
 from app import _master_rows, _shopify_products, _load_json
 from generator import build
@@ -38,8 +38,15 @@ def _restore_latest():
         if not isinstance(payload,dict): payload=json.loads(payload)
         arts={k:(v.encode('utf-8') if isinstance(v,str) else bytes(v)) for k,v in payload.items()}
         if summary.get('dataset_hash')!=dataset_hash: raise RuntimeError('persisted dataset hash mismatch')
-        with LOCK: STATE.update(status='blocked',error=None,last_refresh=created_at.timestamp() if hasattr(created_at,'timestamp') else time.time(),summary=summary,artifacts=arts,product_xml_validation={},persistence_ok=True,persistence_error=None,recovered_from_postgres=True)
-        print('CONTENT_SNAPSHOT_RECOVERED',json.dumps({'safe_mappings_fetched':summary.get('safe_mappings_fetched'),'dataset_hash':dataset_hash},sort_keys=True),flush=True)
+        image_rows=list(csv.DictReader(io.StringIO(arts['image-audit.csv'].decode('utf-8-sig'))))
+        proposal_rows=list(csv.DictReader(io.StringIO(arts['master-bulk-write-proposal.csv'].decode('utf-8-sig'))))
+        https_pass=sum((r.get('https_pass')=='YES') for r in image_rows)
+        direct_pass=sum((r.get('direct_pass')=='YES') for r in image_rows)
+        lt1000=sum((float(r.get('width') or 0)<1000 or float(r.get('height') or 0)<1000) for r in image_rows)
+        diag=dict(summary)
+        diag.update({'images_https_pass':https_pass,'images_direct_pass':direct_pass,'images_lt1000':lt1000,'bulk_write_rows':len(proposal_rows),'bulk_write_cells':len(proposal_rows)})
+        with LOCK: STATE.update(status='blocked',error=None,last_refresh=created_at.timestamp() if hasattr(created_at,'timestamp') else time.time(),summary=diag,artifacts=arts,product_xml_validation={},persistence_ok=True,persistence_error=None,recovered_from_postgres=True)
+        print('CONTENT_SNAPSHOT_RECOVERED',json.dumps(diag,sort_keys=True),flush=True)
         return True
     except Exception as e:
         print('CONTENT_SNAPSHOT_RECOVERY_FAILED',type(e).__name__,str(e),flush=True)
