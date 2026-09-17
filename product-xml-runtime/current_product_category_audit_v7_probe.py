@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import csv, io, json
+import csv, io, json, re
 from collections import Counter
 
 import current_product_category_audit as v3
@@ -11,6 +11,11 @@ TOP_N=30
 GENERIC_TYPES={'','product','products','item','items','general','other'}
 ACCESSORY_WORDS=('accessory','accessories','adapter','replacement','cover','liner','insole','insert','case','bag','wall','net','strap','holder','stand','part','parts')
 GENDER_WORDS=('women','woman','female','men','man','male','girls','girl','boys','boy','kids','kid','children','child')
+OBJECT_TERMS=(
+    'hoodie','hoodies','sweatshirt','sweatshirts','trouser','trousers','pants','shorts','jogger','joggers',
+    'jacket','jackets','coat','coats','windbreaker','windbreakers','shirt','shirts','jersey','jerseys','bib','bibs',
+    'rainwear','thermal','insulated','fleece','softshell','activewear'
+)
 
 
 def _rows_from_artifact(db,name):
@@ -38,26 +43,88 @@ def _cat_path(by_cat,cid):
     return ' > '.join(reversed(out))
 
 
-def _gap_types(reg_row,members,candidates):
+def _terminal_hint(v):
+    s=v3._norm(v)
+    if not s: return ''
+    parts=re.split(r'\s*(?:>|→|›)\s*',s)
+    return parts[-1].strip() if parts else s
+
+
+def _object_terms(reg_row,members):
+    text=' '.join(
+        [v3._norm(reg_row.get('representative_titles')),v3._norm(reg_row.get('product_type')),_terminal_hint(reg_row.get('shopify_hint'))]
+        +[v3._norm(x.get('shopify_title') or x.get('220_title')) for x in members]
+        +[v3._norm(x.get('product_type')) for x in members]
+    ).casefold()
+    found=[]
+    for term in OBJECT_TERMS:
+        if re.search(r'(?<![a-z])'+re.escape(term)+r'(?![a-z])',text):
+            found.append(term)
+    # collapse obvious singular/plural synonyms for more compact taxonomy search
+    canonical=[]
+    groups={
+        'hoodie':{'hoodie','hoodies'},'sweatshirt':{'sweatshirt','sweatshirts'},'trousers':{'trouser','trousers','pants'},
+        'shorts':{'shorts'},'joggers':{'jogger','joggers'},'jacket':{'jacket','jackets'},'coat':{'coat','coats'},
+        'windbreaker':{'windbreaker','windbreakers'},'shirt':{'shirt','shirts'},'jersey':{'jersey','jerseys'},'bib':{'bib','bibs'},
+        'rainwear':{'rainwear'},'thermal':{'thermal'},'insulated':{'insulated'},'fleece':{'fleece'},'softshell':{'softshell'},'activewear':{'activewear'},
+    }
+    for key,vals in groups.items():
+        if any(x in found for x in vals): canonical.append(key)
+    return canonical
+
+
+def _taxonomy_neighbors(cats,by_cat,terms,limit=15):
+    if not terms: return []
+    scored=[]
+    for cat in cats:
+        if str(cat.get('allow_add_products')).casefold() not in {'true','1','yes'}:
+            continue
+        vals=[v3._norm(cat.get(k)) for k in ('title_en','title_lv','title_lt','title_ee','title_fi','title_ru')]
+        text=' '.join(vals).casefold()
+        hits=[]
+        for term in terms:
+            variants={term}
+            if term=='trousers': variants|={'trouser','pants'}
+            if term=='hoodie': variants|={'hoodies'}
+            if term=='jacket': variants|={'jackets'}
+            if term=='shirt': variants|={'shirts'}
+            if term=='shorts': variants|={'short'}
+            if any(re.search(r'(?<![a-z])'+re.escape(v)+r'(?![a-z])',text) for v in variants): hits.append(term)
+        if not hits: continue
+        cid=str(cat.get('category_id'))
+        title=v3._norm(cat.get('title_en')) or v3._norm(cat.get('title_lv'))
+        score=len(set(hits))*10 + sum(1 for t in terms if t in (v3._norm(cat.get('title_en')).casefold()))
+        scored.append((score,title,cid,{
+            'category_id':cid,'category_name':title,'matched_object_terms':sorted(set(hits)),
+            'allow_add_products':cat.get('allow_add_products'),'path':_cat_path(by_cat,cid),
+        }))
+    scored.sort(key=lambda x:(-x[0],x[1],x[2]))
+    return [x[3] for x in scored[:limit]]
+
+
+def _gap_types(reg_row,members,neighbors):
     titles={v3._norm(x.get('shopify_title') or x.get('220_title')) for x in members if v3._norm(x.get('shopify_title') or x.get('220_title'))}
     vendors={v3._norm(x.get('vendor')) for x in members if v3._norm(x.get('vendor'))}
     ptypes={v3._norm(x.get('product_type')) for x in members if v3._norm(x.get('product_type')).casefold() not in GENERIC_TYPES}
     pids={v3._norm(x.get('shopify_product_id')) for x in members if v3._norm(x.get('shopify_product_id'))}
-    txt=' '.join(list(titles)+list(ptypes)+[v3._norm(reg_row.get('shopify_hint'))]).casefold()
+    terminal=_terminal_hint(reg_row.get('shopify_hint'))
+    product_txt=' '.join(list(titles)+list(ptypes)+[terminal]).casefold()
     gaps=[]
     if not ptypes:
         gaps.append('MISSING_EXACT_PRODUCT_TYPE')
     if len(titles)>1 or len(vendors)>1 or len(ptypes)>1 or len(pids)>1:
         gaps.append('FAMILY_HOMOGENEITY_INSUFFICIENT')
-    if any(w in txt for w in ACCESSORY_WORDS):
+    if any(re.search(r'(?<![a-z])'+re.escape(w)+r'(?![a-z])',product_txt) for w in ACCESSORY_WORDS):
         gaps.append('ACCESSORY_VS_MAIN_PRODUCT_AMBIGUITY')
-    cand_titles=' '.join(v3._norm(c.get('category_name')) for c in candidates).casefold()
-    if any(w in cand_titles for w in GENDER_WORDS) and not any(w in txt for w in GENDER_WORDS):
+    neighbor_titles=' '.join(v3._norm(c.get('category_name')) for c in neighbors).casefold()
+    if any(w in neighbor_titles for w in GENDER_WORDS) and not any(w in product_txt for w in GENDER_WORDS):
         gaps.append('GENDER_AUDIENCE_UNPROVEN')
-    if not candidates:
-        gaps.append('NO_PROVEN_PHH_LEAF_CANDIDATE')
+    if not neighbors:
+        gaps.append('NO_LIVE_PHH_LEAF_NEIGHBOR_FOUND')
+    elif len(neighbors)>1:
+        gaps.append('MULTIPLE_LIVE_PHH_LEAF_NEIGHBORS_REQUIRE_ADJUDICATION')
     else:
-        gaps.append('EXACT_PHH_LEAF_NOT_PROVEN')
+        gaps.append('SINGLE_LIVE_PHH_LEAF_NEIGHBOR_NOT_YET_PROVEN')
     return gaps
 
 
@@ -75,18 +142,9 @@ def run_probe(master_rows,shopify,db,top_n=TOP_N):
     for rank,r in enumerate(selected,1):
         key=r.get('family_key') or ''
         members=groups.get(key) or []
-        cands=[]
-        for c in _json_or_empty(r.get('v4_candidates'))[:5]:
-            cid=str(c.get('category_id') or '')
-            cat=by_cat.get(cid) or {}
-            cands.append({
-                'category_id':cid,
-                'category_name':c.get('category_name') or v3._norm(cat.get('title_en')),
-                'score':c.get('score'),
-                'allow_add_products':cat.get('allow_add_products'),
-                'path':_cat_path(by_cat,cid) if cid else '',
-            })
-        gaps=_gap_types(r,members,cands)
+        terms=_object_terms(r,members)
+        neighbors=_taxonomy_neighbors(cats,by_cat,terms)
+        gaps=_gap_types(r,members,neighbors)
         gap_counts.update(gaps)
         exact_titles=sorted({v3._norm(x.get('shopify_title') or x.get('220_title')) for x in members if v3._norm(x.get('shopify_title') or x.get('220_title'))})
         ptypes=sorted({v3._norm(x.get('product_type')) for x in members if v3._norm(x.get('product_type'))})
@@ -98,16 +156,15 @@ def run_probe(master_rows,shopify,db,top_n=TOP_N):
             'member_skus':[v3._norm(x.get('220_sku')) for x in members],
             'exact_titles':exact_titles,'product_types':ptypes,'vendors':vendors,'shopify_product_ids':pids,
             'variant_titles':variant_titles[:30],
-            'shopify_hint':v3._norm(r.get('shopify_hint')),
-            'brand':v3._norm(r.get('brand')),
-            'candidate_leafs':cands,
-            'evidence_gaps':gaps,
-            'v6_priority_rank':r.get('priority_rank'),
+            'shopify_hint':v3._norm(r.get('shopify_hint')),'shopify_terminal_hint':_terminal_hint(r.get('shopify_hint')),
+            'brand':v3._norm(r.get('brand')),'object_terms':terms,
+            'live_pHH_leaf_neighbors':neighbors,
+            'evidence_gaps':gaps,'v6_priority_rank':r.get('priority_rank'),
         }
         out.append(rec)
         print('V7_FAMILY_DIAG '+json.dumps(rec,ensure_ascii=False,sort_keys=True),flush=True)
     summary={
-        'status':'PASS','probe_version':'targeted-leaf-adjudication-v7-probe','products_total':len(ids),
+        'status':'PASS','probe_version':'targeted-leaf-adjudication-v7-probe-r2','products_total':len(ids),
         'families_total':len(groups),'families_examined':len(out),'top_n_requested':top_n,
         'gap_type_counts':dict(gap_counts),'group_build':diag,'taxonomy_categories_fetched':tax_summary.get('categories_fetched'),
         'safety':{'Master_writes':0,'PHH_writes':0,'Shopify_writes':0,'Product_XML':'OFF','stock_changes':0,'price_changes':0},
