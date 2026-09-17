@@ -28,14 +28,14 @@ def _login(version="v3", timeout=25):
     return requests.post(
         urljoin(BASE, f"/{version}/login"),
         json={"username": u, "password": p}, timeout=timeout,
-        headers={"User-Agent": "outfish-phh-category-exporter/1.0", "Accept": "application/json"},
+        headers={"User-Agent": "outfish-phh-category-exporter/1.1", "Accept": "application/json"},
     )
 
 
 def _get(path, token, timeout=45):
     return requests.get(
         urljoin(BASE, path), timeout=timeout,
-        headers={"User-Agent": "outfish-phh-category-exporter/1.0", "Accept": "application/json", "Authorization": "Pigu-mp " + token},
+        headers={"User-Agent": "outfish-phh-category-exporter/1.1", "Accept": "application/json", "Authorization": "Pigu-mp " + token},
     )
 
 
@@ -51,7 +51,8 @@ def _category_path(category_id, by_id):
     while current is not None and current not in seen:
         seen.add(current)
         row = by_id.get(current)
-        if not row: break
+        if not row:
+            break
         title = row.get("title_en") or row.get("title_lv") or row.get("title_lt") or str(current)
         parts.append(str(title)); current = row.get("parent_id")
     return " > ".join(reversed(parts))
@@ -84,26 +85,33 @@ def _persist(summary, artifacts):
         return False, f"{type(e).__name__}: {e}"
 
 
-def export_all(version="v3", limit=100, persist=True):
-    login = _login(version)
-    if not login.ok:
-        raise RuntimeError(f"PMP API login failed: HTTP {login.status_code}")
-    body = login.json(); token = body.get("token") if isinstance(body, dict) else None
-    if not token: raise RuntimeError("PMP API login succeeded but token is missing")
+def export_all(version="v3", limit=100, persist=True, token=None):
+    if not token:
+        login = _login(version)
+        if not login.ok:
+            raise RuntimeError(f"PMP API login failed: HTTP {login.status_code}")
+        body = login.json(); token = body.get("token") if isinstance(body, dict) else None
+        if not token:
+            raise RuntimeError("PMP API login succeeded but token is missing")
 
     categories, offset, total_count, page_count = [], 0, None, 0
     while total_count is None or offset < total_count:
         r = _get(f"/{version}/categories?limit={limit}&offset={offset}", token)
-        if not r.ok: raise RuntimeError(f"categories page failed at offset={offset}: HTTP {r.status_code}")
+        if not r.ok:
+            raise RuntimeError(f"categories page failed at offset={offset}: HTTP {r.status_code}")
         data = r.json(); page = data.get("category_list") or []; meta = data.get("meta") or {}
-        if not isinstance(page, list): raise RuntimeError("category_list is not an array")
+        if not isinstance(page, list):
+            raise RuntimeError("category_list is not an array")
         if total_count is None:
             total_count = int(meta.get("total_count") or 0)
-            if total_count <= 0: raise RuntimeError("invalid total_count")
+            if total_count <= 0:
+                raise RuntimeError("invalid total_count")
         categories.extend(page); page_count += 1
-        if not page: break
+        if not page:
+            break
         offset += len(page)
-        if page_count > 100: raise RuntimeError("pagination safety limit exceeded")
+        if page_count > 100:
+            raise RuntimeError("pagination safety limit exceeded")
 
     ids = [c.get("category_id") for c in categories if c.get("category_id") is not None]
     counts = Counter(ids); duplicate_ids = sorted(k for k, v in counts.items() if v > 1)
@@ -113,17 +121,21 @@ def export_all(version="v3", limit=100, persist=True):
     categories_with_attributes = categories_with_required = max_attribute_count = 0
     for c in categories:
         attrs = c.get("attributes") or []
-        if attrs: categories_with_attributes += 1
-        if any(bool(a.get("required")) for a in attrs if isinstance(a, dict)): categories_with_required += 1
+        if attrs:
+            categories_with_attributes += 1
+        if any(bool(a.get("required")) for a in attrs if isinstance(a, dict)):
+            categories_with_required += 1
         max_attribute_count = max(max_attribute_count, len(attrs))
         path = _category_path(c.get("category_id"), by_id)
         for a in attrs:
-            if not isinstance(a, dict): continue
+            if not isinstance(a, dict):
+                continue
             extra = set(a.keys()) - EXPECTED_ATTRIBUTE_KEYS; extra_attribute_keys.update(extra)
             fid = a.get("field_id")
             if fid is not None:
                 unique_field_ids.add(fid)
-                if a.get("required"): required_field_ids.add(fid)
+                if a.get("required"):
+                    required_field_ids.add(fid)
             attribute_rows.append({
                 "category_id": c.get("category_id"), "category_path": path,
                 "allow_add_products": c.get("allow_add_products"), "field_id": fid,
@@ -146,7 +158,8 @@ def export_all(version="v3", limit=100, persist=True):
             "title_fi": c.get("title_fi") or "", "title_ru": c.get("title_ru") or "", "title_pl": c.get("title_pl") or "",
         }
         category_rows.append(row)
-        if c.get("allow_add_products") is True: leaf_rows.append(row)
+        if c.get("allow_add_products") is True:
+            leaf_rows.append(row)
 
     summary = {
         "status": "PASS" if len(categories) == total_count and not duplicate_ids else "REVIEW",
