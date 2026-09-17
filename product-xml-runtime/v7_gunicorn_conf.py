@@ -21,8 +21,10 @@ def when_ready(server):
         try:
             from app import _master_rows, _shopify_products
             from current_product_category_audit_v7_probe import run_probe
+            from v7_taxonomy_diff import run as run_taxonomy_diff
             master=_master_rows(); shopify=_shopify_products(master)
             summary,_=run_probe(master,shopify,os.getenv('DATABASE_URL'),top_n=30)
+            run_taxonomy_diff(os.getenv('DATABASE_URL'))
             server.log.info('V7_TARGETED_LEAF_PROBE_COMPLETE %s',json.dumps(summary,sort_keys=True))
         except Exception as exc:
             server.log.warning('V7_TARGETED_LEAF_PROBE_FAILED %s %s',type(exc).__name__,str(exc)[:2000])
