@@ -5,10 +5,11 @@ import psycopg
 
 SEM_LABELS={'brand':'Brand','color':'Color','size':'Clothing Size','season':'Season','material':'Material','audience':'Intended For','model':'Clothing Model','hood':'Hood','jacket_length':'Jacket Length','weight':'Weight','pattern':'Pattern','closure':'Closure'}
 SPECIAL={
-('434','2211'):'Comfort Temperature',('434','2212'):'Extreme Temperature',('434','8888'):'Length (Unfolded)',('434','8891'):'Width (Unfolded)',('434','8897'):'Length (Packed)',('434','8900'):'Width (Packed)',('434','8912'):'Filling',('434','13034'):'Shape',('434','36620'):'Height (Packed)',
-('17977','105398'):'Type',('20523','106788'):'Type',('20523','106798'):'DEN',('20523','106818'):'Quantity in Package',
-('433','2181'):'Number of Persons',('433','2184'):'Waterproofness',('433','2190'):'Number of Entrances',('433','2192'):'Snow Protection',('433','2193'):'Mosquito Net',('433','2194'):'Ventilation',('433','2195'):'Pockets',('433','5924'):'Length',('433','5927'):'Width',('433','35951'):'Number of Layers',('433','79440'):'Height',('433','111938'):'Type',
-('5669','98226'):'Country of Origin',('5669','106208'):'Heel Height',('5669','106213'):'Sole Type',
+('434','2211'):'Comfort Temperature',('434','2212'):'Extreme Temperature',('434','8888'):'Length (Unfolded)',('434','8891'):'Width (Unfolded)',('434','8897'):'Length (Packed)',('434','8900'):'Width (Packed)',('434','8912'):'Filling',('434','13034'):'Shape',('434','36620'):'Height (Packed)',('434','8906'):'Outer Material',('434','8909'):'Inner Material',
+('17977','105398'):'Type',('17977','106008'):'Style',('17977','106013'):'Clothing Model',
+('20523','106788'):'Type',('20523','106798'):'DEN',('20523','106818'):'Quantity in Package',
+('433','2181'):'Number of Persons',('433','2184'):'Waterproofness',('433','2190'):'Number of Entrances',('433','2191'):'Number of Vestibules',('433','2192'):'Snow Protection',('433','2193'):'Mosquito Net',('433','2194'):'Ventilation',('433','2195'):'Pockets',('433','5924'):'Length',('433','5927'):'Width',('433','35951'):'Number of Layers',('433','35954'):'Outer Material',('433','35957'):'Inner Material',('433','79440'):'Height',('433','111938'):'Type',('433','11483'):'Weight, kg',
+('5669','98226'):'Country of Origin',('5669','106208'):'Heel Height',('5669','106213'):'Sole Type',('5669','48055'):'Upper Material',('5669','48125'):'Inner Material',('5669','97926'):'Sole Material',('5669','65570'):'Shoe Size',
 ('11810','49845'):'Country of Origin',('11810','49875'):'Type',('11810','49880'):'Length',('11810','51315'):'Style',('11810','72515'):'Width',('11810','79375'):'Hammock Type',
 ('4391','10982'):'Glue Type',('4391','102011'):'Volume',('4391','104146'):'Aerosol Volume'}
 
