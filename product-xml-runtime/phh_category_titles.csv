@@ -1,0 +1,5 @@
+page,category_id,category_en,category_lt,category_lv,category_ee,category_fi
+7,49,Desktop computer,Stacionarūs kompiuteriai,Stacionārie datori,Lauaarvutid,Pöytätietokoneet
+7,50,Laptop,Nešiojami kompiuteriai,Portatīvie datori,Sülearvutid,Kannettavat tietokoneet
+7,56,Video cards,Vaizdo plokštės (GPU),Videokartes (GPU),Videokaardid (GPU),Näytönohjaimet
+8,57,Uninterruptible power supply (UPS),Nepertraukiamo maitinimo šaltiniai (UPS),UPS- Nepārtrauktās barošanas bloki,Puhvertoiteallikad (UPS),UPS-laitteet
