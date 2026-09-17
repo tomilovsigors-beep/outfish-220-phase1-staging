@@ -1,0 +1,4 @@
+category_id,category_name,property_key,property_name,required,allowed_values,value_type,package_dimensions_required,fashion_package_exempt
+TEST-100,Fixture Jackets,color,Color,true,"Black|Green",string,false,true
+TEST-100,Fixture Jackets,size,Size,true,"S|M|L|XL",string,false,true
+TEST-200,Fixture Equipment,material,Material,false,"Steel|Aluminium",string,true,false
