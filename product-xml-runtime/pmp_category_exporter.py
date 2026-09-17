@@ -28,14 +28,14 @@ def _login(version="v3", timeout=25):
     return requests.post(
         urljoin(BASE, f"/{version}/login"),
         json={"username": u, "password": p}, timeout=timeout,
-        headers={"User-Agent": "outfish-phh-category-exporter/1.1", "Accept": "application/json"},
+        headers={"User-Agent": "outfish-phh-category-exporter/1.2", "Accept": "application/json"},
     )
 
 
 def _get(path, token, timeout=45):
     return requests.get(
         urljoin(BASE, path), timeout=timeout,
-        headers={"User-Agent": "outfish-phh-category-exporter/1.1", "Accept": "application/json", "Authorization": "Pigu-mp " + token},
+        headers={"User-Agent": "outfish-phh-category-exporter/1.2", "Accept": "application/json", "Authorization": "Pigu-mp " + token},
     )
 
 
@@ -56,6 +56,21 @@ def _category_path(category_id, by_id):
         title = row.get("title_en") or row.get("title_lv") or row.get("title_lt") or str(current)
         parts.append(str(title)); current = row.get("parent_id")
     return " > ".join(reversed(parts))
+
+
+def _authoritative_pdf_ids():
+    path = os.path.join(os.path.dirname(__file__), "phh-category-titles-authoritative-ids.csv")
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        rows = csv.DictReader(f)
+        out = []
+        for r in rows:
+            try:
+                out.append(int(str(r.get("category_id") or "").strip()))
+            except ValueError:
+                continue
+        return out
 
 
 def _persist(summary, artifacts):
@@ -117,6 +132,28 @@ def export_all(version="v3", limit=100, persist=True, token=None):
     counts = Counter(ids); duplicate_ids = sorted(k for k, v in counts.items() if v > 1)
     by_id = {c.get("category_id"): c for c in categories if c.get("category_id") is not None}
 
+    pdf_ids = _authoritative_pdf_ids()
+    pdf_crosscheck_rows = []
+    for cid in pdf_ids:
+        c = by_id.get(cid)
+        if c is None:
+            status = "API_NOT_FOUND"
+        elif c.get("allow_add_products") is True:
+            status = "API_FOUND_ADDABLE"
+        else:
+            status = "API_FOUND_NONADDABLE"
+        pdf_crosscheck_rows.append({
+            "category_id": cid,
+            "status": status,
+            "allow_add_products": "" if c is None else c.get("allow_add_products"),
+            "parent_id": "" if c is None else c.get("parent_id"),
+            "title_en": "" if c is None else (c.get("title_en") or ""),
+            "title_lv": "" if c is None else (c.get("title_lv") or ""),
+            "attribute_count": 0 if c is None else len(c.get("attributes") or []),
+            "required_attribute_count": 0 if c is None else sum(1 for a in (c.get("attributes") or []) if isinstance(a, dict) and a.get("required")),
+        })
+    pdf_status_counts = Counter(r["status"] for r in pdf_crosscheck_rows)
+
     attribute_rows, extra_attribute_keys, unique_field_ids, required_field_ids = [], set(), set(), set()
     categories_with_attributes = categories_with_required = max_attribute_count = 0
     for c in categories:
@@ -172,15 +209,23 @@ def export_all(version="v3", limit=100, persist=True, token=None):
         "unique_required_field_ids": len(required_field_ids), "max_attribute_count_per_category": max_attribute_count,
         "unexpected_attribute_keys": sorted(extra_attribute_keys),
         "live_api_exposes_type_unit_allowed_values": bool(extra_attribute_keys & {"type","unit","units","values","options","allowed_values","enum"}),
+        "authoritative_pdf_unique_ids": len(pdf_ids),
+        "authoritative_pdf_api_found_addable": pdf_status_counts.get("API_FOUND_ADDABLE", 0),
+        "authoritative_pdf_api_found_nonaddable": pdf_status_counts.get("API_FOUND_NONADDABLE", 0),
+        "authoritative_pdf_api_not_found": pdf_status_counts.get("API_NOT_FOUND", 0),
+        "authoritative_pdf_missing_ids": [r["category_id"] for r in pdf_crosscheck_rows if r["status"] == "API_NOT_FOUND"],
+        "authoritative_pdf_nonaddable_ids": [r["category_id"] for r in pdf_crosscheck_rows if r["status"] == "API_FOUND_NONADDABLE"],
         "phh_marketplace_writes": 0,
     }
     category_fields = ["category_id","parent_id","category_path","allow_add_products","attribute_count","required_attribute_count","title_en","title_lv","title_lt","title_ee","title_fi","title_ru","title_pl"]
     attribute_fields = ["category_id","category_path","allow_add_products","field_id","required","title_lt","title_lv","title_ee","title_fi","title_ru","extra_json"]
+    pdf_crosscheck_fields = ["category_id","status","allow_add_products","parent_id","title_en","title_lv","attribute_count","required_attribute_count"]
     artifacts = {
         "pmp-categories-full.json": json.dumps({"summary": summary, "category_list": categories}, ensure_ascii=False, sort_keys=True, indent=2).encode(),
         "pmp-categories.csv": _csv_bytes(category_rows, category_fields),
         "pmp-leaf-categories.csv": _csv_bytes(leaf_rows, category_fields),
         "pmp-category-attributes.csv": _csv_bytes(attribute_rows, attribute_fields),
+        "pmp-authoritative-pdf-crosscheck.csv": _csv_bytes(pdf_crosscheck_rows, pdf_crosscheck_fields),
         "pmp-category-export-summary.json": json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2).encode(),
     }
     if persist:
