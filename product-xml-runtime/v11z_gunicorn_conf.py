@@ -23,15 +23,16 @@ def _register(server):
                 return Response(json.dumps({'status':'ERROR','error':f'{type(exc).__name__}: {exc}'}),status=503,mimetype='application/json')
         if 'v11z_manual_preflight_json' not in app.view_functions: app.add_url_rule('/v11/manual-input-preflight.json','v11z_manual_preflight_json',js,methods=['GET'])
         if 'v11z_manual_preflight_csv' not in app.view_functions: app.add_url_rule('/v11/manual-input-preflight.csv','v11z_manual_preflight_csv',cs,methods=['GET'])
-        server.log.info('V11Z_MANUAL_PREFLIGHT_ROUTES_READY')
+        server.log.info('V11Z_MANUAL_PREFLIGHT_ROUTES_READY pre_fork=true')
     except Exception as exc:
         server.log.warning('V11Z_MANUAL_PREFLIGHT_ROUTES_FAILED %s %s',type(exc).__name__,str(exc)[:3000])
 
 def on_starting(server):
     if hasattr(base,'on_starting'): base.on_starting(server)
+    # Register before Gunicorn forks workers so the live GET routes exist in every worker.
+    _register(server)
 
 def when_ready(server):
-    _register(server)
     if os.getenv('RUN_V11Z_MANUAL_INPUT_PREFLIGHT','').strip()=='1':
         server.log.info('V11Z_MANUAL_INPUT_PREFLIGHT_START')
         def task():
