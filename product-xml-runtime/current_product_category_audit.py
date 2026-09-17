@@ -133,7 +133,7 @@ def _best_leaf_overlap(source_tokens,leaf_by_lang):
     best=(0.0,0,set())
     for _,lt in leaf_by_lang:
         if not lt: continue
-        inter=source_tokens&lt; cov=len(inter)/len(lt)
+        inter=source_tokens & lt; cov=len(inter)/len(lt)
         if (cov,len(inter))>(best[0],best[1]): best=(cov,len(inter),inter)
     return best
 
