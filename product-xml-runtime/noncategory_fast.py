@@ -26,14 +26,16 @@ def run_noncategory_fast():
     for r in safe:
         sku=_norm(r.get('220_sku')); p=shopify[_norm(r.get('shopify_product_id'))]
         usable=[im for im in p.get('images') or [] if _norm(im.get('url')).lower().startswith('https://') and _norm(im.get('mime_type')).lower() in ALLOWED_MIME and (im.get('width') or 0)>=1000 and (im.get('height') or 0)>=1000]
-        title_ok=bool(_norm(r.get('220_title'))); desc_ok=bool(_norm(r.get('220_description'))); group_ok=_norm(r.get('220_grouping_status'))=='PASS'; ean_ok=_ean_ok(r.get('220_ean')); supplier_ok=bool(sku) and sku_counts[sku]==1; img_ok=len(usable)>=2; bg_ok=bgby[sku]['background_status']=='BACKGROUND_PASS'; package_ok=pkgby[sku]['source_status']!='NO_PACKAGE_SOURCE'
-        ok=title_ok and desc_ok and group_ok and ean_ok and supplier_ok and img_ok and bg_ok and package_ok
-        cand.append({'220_sku':sku,'220_ean':_norm(r.get('220_ean')),'title_pass':'YES' if title_ok else 'NO','description_pass':'YES' if desc_ok else 'NO','grouping_pass':'YES' if group_ok else 'NO','ean_pass':'YES' if ean_ok else 'NO','supplier_code_pass':'YES' if supplier_ok else 'NO','technical_images_ge2':'YES' if img_ok else 'NO','background_pass':'YES' if bg_ok else 'NO','package_source_status':pkgby[sku]['source_status'],'CATEGORY_PENDING_PILOT_CANDIDATE':'YES' if ok else 'NO'})
+        title_ok=bool(_norm(r.get('220_title'))); desc_ok=bool(_norm(r.get('220_description'))); group_ok=_norm(r.get('220_grouping_status'))=='PASS'; ean_ok=_ean_ok(r.get('220_ean')); supplier_ok=bool(sku) and sku_counts[sku]==1; img_ok=len(usable)>=2; bg_ok=bgby[sku]['background_status']=='BACKGROUND_PASS'
+        # Missing L/W/H or packaged weight is category-dependent until authoritative PHH category rules arrive.
+        # Therefore it is not an independent blocker for CATEGORY_PENDING_PILOT_CANDIDATE.
+        package_independent_ok=True
+        ok=title_ok and desc_ok and group_ok and ean_ok and supplier_ok and img_ok and bg_ok and package_independent_ok
+        cand.append({'220_sku':sku,'220_ean':_norm(r.get('220_ean')),'title_pass':'YES' if title_ok else 'NO','description_pass':'YES' if desc_ok else 'NO','grouping_pass':'YES' if group_ok else 'NO','ean_pass':'YES' if ean_ok else 'NO','supplier_code_pass':'YES' if supplier_ok else 'NO','technical_images_ge2':'YES' if img_ok else 'NO','background_pass':'YES' if bg_ok else 'NO','package_source_status':pkgby[sku]['source_status'],'package_independent_blocker':'NO','CATEGORY_PENDING_PILOT_CANDIDATE':'YES' if ok else 'NO'})
     bc=Counter(x['background_status'] for x in bg); pc=Counter(x['source_status'] for x in pkg); blockers=Counter()
     for x in cand:
         for k in ('title_pass','description_pass','grouping_pass','ean_pass','supplier_code_pass','technical_images_ge2','background_pass'):
             if x[k]!='YES': blockers[k]+=1
-        if x['package_source_status']=='NO_PACKAGE_SOURCE': blockers['package_source_no_independent_evidence']+=1
-    summary={'safe_mappings':len(safe),'unique_images_downloaded':len(cache),'residual_metafield_scan_complete':bool(mf_complete),'package_source':dict(pc),'background':dict(bc),'category_pending_pilot_candidate':sum(x['CATEGORY_PENDING_PILOT_CANDIDATE']=='YES' for x in cand),'remaining_noncategory_blockers':dict(blockers),'master_writes':0,'shopify_writes':0,'phh_sends':0,'product_xml_publication':'OFF'}
+    summary={'safe_mappings':len(safe),'unique_images_downloaded':len(cache),'residual_metafield_scan_complete':bool(mf_complete),'package_source':dict(pc),'background':dict(bc),'category_pending_pilot_candidate':sum(x['CATEGORY_PENDING_PILOT_CANDIDATE']=='YES' for x in cand),'remaining_noncategory_blockers':dict(blockers),'package_rule_note':'NO_INDEPENDENT_PACKAGE_BLOCKER_BEFORE_AUTHORITATIVE_PHH_CATEGORY_RULES','master_writes':0,'shopify_writes':0,'phh_sends':0,'product_xml_publication':'OFF'}
     arts={'background-audit-673.csv':_csv(bg),'package-source-673.csv':_csv(pkg),'category-pending-pilot-candidate.csv':_csv(cand),'noncategory-summary.json':json.dumps(summary,ensure_ascii=False,indent=2,sort_keys=True).encode()}
     return summary,arts
