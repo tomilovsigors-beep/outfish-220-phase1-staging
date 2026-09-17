@@ -19,9 +19,12 @@ def when_ready(server):
         return
     def _run():
         try:
-            from v7_snapshot_diag import run
-            obj=run(os.getenv('DATABASE_URL'))
-            server.log.info('V7_VALIDATION_DIAG_COMPLETE %s',json.dumps({'status':obj.get('status')},sort_keys=True))
+            from app import _master_rows, _shopify_products, _shopify_token
+            from current_product_category_audit_v7b import run_audit
+            master=_master_rows(); shopify=_shopify_products(master)
+            token=_shopify_token(); domain=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
+            summary,_=run_audit(master,shopify,os.getenv('DATABASE_URL'),token=token,shop_domain=domain)
+            server.log.info('V7B_FINAL_AUDIT_COMPLETE %s',json.dumps(summary,sort_keys=True))
         except Exception as exc:
-            server.log.warning('V7_VALIDATION_DIAG_FAILED %s %s',type(exc).__name__,str(exc)[:2000])
-    threading.Thread(target=_run,daemon=True,name='v7-validation-diag').start()
+            server.log.warning('V7B_FINAL_AUDIT_FAILED %s %s',type(exc).__name__,str(exc)[:2000])
+    threading.Thread(target=_run,daemon=True,name='v7b-final-audit').start()
