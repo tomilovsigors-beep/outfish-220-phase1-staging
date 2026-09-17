@@ -18,7 +18,11 @@ def run():
     out=[]
     for r in blocked:
         cid=str(r.get('selected_category_id') or '')
-        out.append({'sku':r.get('220_sku'),'ean':r.get('220_ean'),'category_id':cid,'category_name':r.get('selected_category_name') or '','fields':req.get(cid,[])})
+        fields=req.get(cid,[])
+        item={'sku':r.get('220_sku'),'ean':r.get('220_ean'),'category_id':cid,'category_name':r.get('selected_category_name') or '','fields':fields}
+        out.append(item)
+        compact={'sku':item['sku'],'ean':item['ean'],'category_id':cid,'category_name':item['category_name'],'field_ids':[str(x.get('field_id')) for x in fields]}
+        print('PHH_MANUAL_INPUT_ROW_V11P '+json.dumps(compact,ensure_ascii=False,separators=(',',':')),flush=True)
     payload={'status':'PASS','count':len(out),'products':out,'safety':{'writes':0}}
     print('PHH_MANUAL_INPUT_MAP_V11P '+json.dumps(payload,ensure_ascii=False,separators=(',',':')),flush=True)
     return payload
