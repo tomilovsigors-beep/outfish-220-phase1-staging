@@ -43,8 +43,9 @@ def on_starting(server):
 def when_ready(server):
     def _audit():
         try:
-            from noncategory_audit import run_noncategory_audit,emit_artifacts
-            summary,arts=run_noncategory_audit(); emit_artifacts(summary,arts)
+            from noncategory_fast import run_noncategory_fast
+            from noncategory_audit import emit_artifacts
+            summary,arts=run_noncategory_fast(); emit_artifacts(summary,arts)
         except Exception as exc:
             server.log.warning('NONCATEGORY_AUDIT_FAILED %s %s',type(exc).__name__,str(exc)[:2000])
     threading.Thread(target=_audit,daemon=True,name='noncategory-audit').start()
