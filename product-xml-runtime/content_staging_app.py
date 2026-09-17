@@ -132,7 +132,25 @@ def _maybe_run_master_write():
         with LOCK: STATE['master_write']={'status':'ERROR','error':f'{type(e).__name__}: {e}'}
         print('CONTROLLED_MASTER_WRITE_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+def _maybe_run_pmp_discovery():
+    if os.getenv('RUN_PMP_API_DISCOVERY','').strip()!='1':
+        return
+    try:
+        from pmp_api_probe import discover
+        result=discover()
+        safe={
+            'status':result.get('status'),
+            'docs':result.get('docs'),
+            'selected_spec_url':result.get('selected_spec_url'),
+            'openapi_summary':result.get('openapi_summary'),
+            'spec_candidates':result.get('spec_candidates'),
+        }
+        print('PMP_API_DISCOVERY_RESULT',json.dumps(safe,sort_keys=True),flush=True)
+    except Exception as e:
+        print('PMP_API_DISCOVERY_FAILED',type(e).__name__,str(e),flush=True)
+
 def _boot():
+    _maybe_run_pmp_discovery()
     print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in ('GOOGLE_SERVICE_ACCOUNT_JSON','SHOPIFY_CLIENT_ID','SHOPIFY_CLIENT_SECRET','DATABASE_URL')},sort_keys=True),flush=True)
     restored=_restore_latest()
     if restored:
