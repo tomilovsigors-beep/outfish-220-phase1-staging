@@ -106,6 +106,13 @@ def readiness(): return _artifact('product-xml-readiness.csv','text/csv')
 def xml_blockers(): return _artifact('product-xml-blockers.csv','text/csv')
 @app.get('/product-xml-dry-run.xml')
 def xml(): return _artifact('product-xml-dry-run.xml','application/xml')
+@app.get('/pmp-api-discovery.json')
+def pmp_api_discovery():
+    try:
+        from pmp_api_probe import discover
+        return _json(discover())
+    except Exception as e:
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {e}'},503)
 
 def _selftest_recovered_routes():
     paths=['/health','/content-summary.json','/content-dataset.csv','/image-audit.csv','/weight-audit.csv','/grouping-audit.csv','/title-qa.csv','/master-bulk-write-proposal.csv']
