@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json, os, runpy, threading
+import csv, io, json, os, runpy, threading
 
 _BASE=runpy.run_path('gunicorn.conf.py')
 _base_on_starting=_BASE.get('on_starting')
@@ -61,6 +61,26 @@ def _install_batched_exact_lookup(mod, server):
     mod._lookup_skus=_lookup_skus
 
 
+def _install_unresolved_registry(mod, server):
+    original=mod._registry
+    def _registry(db):
+        rows=original(db)
+        accepted=set()
+        try:
+            b=mod.v8.load_latest_artifact(db,'category_rule_library_v1.csv')
+            if b:
+                for r in csv.DictReader(io.StringIO(b.decode('utf-8-sig'))):
+                    if (r.get('status') or '').strip().upper()=='ACCEPTED' and (r.get('family_key') or '').strip():
+                        accepted.add((r.get('family_key') or '').strip())
+        except Exception as exc:
+            server.log.warning('V9_PRIOR_ACCEPTED_LOAD_FAILED %s %s',type(exc).__name__,str(exc)[:1000])
+            raise
+        kept=[r for r in rows if (r.get('family_key') or '').strip() not in accepted or (r.get('family_key') or '').strip() in mod.SPECIAL]
+        server.log.info('V9_PRIOR_ACCEPTED_EXCLUDED count=%s keys=%s',len(accepted),json.dumps(sorted(accepted)))
+        return kept
+    mod._registry=_registry
+
+
 def when_ready(server):
     _register_v9_routes(server)
     run_v9=os.getenv('RUN_V9_IDENTITY_AUDIT','').strip()=='1'
@@ -71,6 +91,7 @@ def when_ready(server):
                 from app import _master_rows, _shopify_token
                 import current_product_identity_audit_v9 as v9
                 _install_batched_exact_lookup(v9,server)
+                _install_unresolved_registry(v9,server)
                 master=_master_rows(); token=_shopify_token()
                 domain=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
                 summary,_=v9.run_audit(master,os.getenv('DATABASE_URL'),token,domain,top_n=30)
