@@ -12,6 +12,27 @@ def on_starting(server):
         _base_on_starting(server)
 
 
+def _install_batched_exact_lookup(mod, server):
+    def _lookup_skus(token, domain, skus):
+        out={}; ambiguous={}; total=len(skus)
+        node_fields='''id sku barcode title selectedOptions{name value} product{id title vendor productType tags status category{name fullName}}'''
+        for start in range(0,total,10):
+            chunk=skus[start:start+10]
+            vardefs=','.join(f'$q{i}:String!' for i in range(len(chunk)))
+            body=' '.join(f'a{i}:productVariants(first:20,query:$q{i}){{nodes{{{node_fields}}}}}' for i in range(len(chunk)))
+            query=f'query V9Batch({vardefs}){{{body}}}'
+            variables={f'q{i}':f'sku:{sku}' for i,sku in enumerate(chunk)}
+            data=mod._graphql(token,domain,query,variables)
+            for i,sku in enumerate(chunk):
+                nodes=(data.get(f'a{i}') or {}).get('nodes') or []
+                exact=[n for n in nodes if mod.v3._norm(n.get('sku'))==sku]
+                if len(exact)==1: out[sku]=exact[0]
+                elif len(exact)>1: ambiguous[sku]=exact
+            server.log.info('V9_SKU_LOOKUP_PROGRESS %s/%s exact=%s ambiguous=%s',min(start+len(chunk),total),total,len(out),len(ambiguous))
+        return out,ambiguous
+    mod._lookup_skus=_lookup_skus
+
+
 def when_ready(server):
     run_v9=os.getenv('RUN_V9_IDENTITY_AUDIT','').strip()=='1'
     if run_v9:
@@ -19,10 +40,11 @@ def when_ready(server):
         def _run():
             try:
                 from app import _master_rows, _shopify_token
-                from current_product_identity_audit_v9 import run_audit
+                import current_product_identity_audit_v9 as v9
+                _install_batched_exact_lookup(v9,server)
                 master=_master_rows(); token=_shopify_token()
                 domain=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
-                summary,_=run_audit(master,os.getenv('DATABASE_URL'),token,domain,top_n=30)
+                summary,_=v9.run_audit(master,os.getenv('DATABASE_URL'),token,domain,top_n=30)
                 server.log.info('V9_IDENTITY_AUDIT_COMPLETE %s',json.dumps(summary,sort_keys=True))
             except Exception as exc:
                 server.log.warning('V9_IDENTITY_AUDIT_FAILED %s %s',type(exc).__name__,str(exc)[:5000])
