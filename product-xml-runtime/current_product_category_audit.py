@@ -174,7 +174,7 @@ def _attribute_source(a,i,p,v,opts):
                 return ('SOURCE_IDENTIFIED_ALLOWED_VALUES_UNPROVEN','selected_options',_norm(val))
         return ('MISSING_SOURCE','','')
     if sem=='material':
-        return ('POTENTIAL_UNSTRUCTURED_SOURCE','title/description','','')
+        return ('POTENTIAL_UNSTRUCTURED_SOURCE','title/description','')
     return ('MISSING_SOURCE','','')
 
 
