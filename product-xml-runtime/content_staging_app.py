@@ -76,6 +76,15 @@ def _persisted_v5_artifact(name,mime):
     except Exception as e:
         return _json({'error':'v5 family category audit artifact unavailable','detail':f'{type(e).__name__}: {e}'},503)
 
+def _persisted_v6_artifact(name,mime):
+    try:
+        from current_product_category_audit_v6 import load_latest_artifact
+        b=load_latest_artifact(os.getenv('DATABASE_URL'),name)
+        if not b: return _json({'error':'v6 category rule audit artifact unavailable'},503)
+        return Response(b,status=200,mimetype=mime,headers={'Cache-Control':'no-store'})
+    except Exception as e:
+        return _json({'error':'v6 category rule audit artifact unavailable','detail':f'{type(e).__name__}: {e}'},503)
+
 @app.get('/health')
 def health():
     with LOCK: x={k:v for k,v in STATE.items() if k!='artifacts'}
@@ -148,6 +157,18 @@ def family_category_review_queue(): return _persisted_v5_artifact('family_catego
 def v5_product_category_mapping(): return _persisted_v5_artifact('v5-product-category-mapping.csv','text/csv')
 @app.get('/v5-category-coverage-summary.json')
 def v5_category_coverage_summary(): return _persisted_v5_artifact('v5-category-coverage-summary.json','application/json')
+@app.get('/category_rule_library_v1.csv')
+def category_rule_library_v1(): return _persisted_v6_artifact('category_rule_library_v1.csv','text/csv')
+@app.get('/v6-family-priority-queue.csv')
+def v6_family_priority_queue(): return _persisted_v6_artifact('v6-family-priority-queue.csv','text/csv')
+@app.get('/v6-family-rule-review.csv')
+def v6_family_rule_review(): return _persisted_v6_artifact('v6-family-rule-review.csv','text/csv')
+@app.get('/v6-product-category-mapping.csv')
+def v6_product_category_mapping(): return _persisted_v6_artifact('v6-product-category-mapping.csv','text/csv')
+@app.get('/v6-category-coverage-summary.json')
+def v6_category_coverage_summary(): return _persisted_v6_artifact('v6-category-coverage-summary.json','application/json')
+@app.get('/v6-rule-audit.json')
+def v6_rule_audit(): return _persisted_v6_artifact('v6-rule-audit.json','application/json')
 
 def _selftest_recovered_routes():
     paths=['/health','/content-summary.json','/content-dataset.csv','/image-audit.csv','/weight-audit.csv','/grouping-audit.csv','/title-qa.csv','/master-bulk-write-proposal.csv']
@@ -187,6 +208,16 @@ def _maybe_run_family_category_audit_v5():
     except Exception as e:
         print('FAMILY_CATEGORY_AUDIT_V5_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+def _maybe_run_category_rule_audit_v6():
+    if os.getenv('RUN_CATEGORY_RULE_AUDIT_V6','').strip()!='1': return
+    try:
+        from current_product_category_audit_v6 import run_audit
+        master=_master_rows(); shopify=_shopify_products(master)
+        summary,_=run_audit(master,shopify,os.getenv('DATABASE_URL'))
+        print('CATEGORY_RULE_AUDIT_V6_RESULT',json.dumps(summary,sort_keys=True),flush=True)
+    except Exception as e:
+        print('CATEGORY_RULE_AUDIT_V6_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _maybe_run_pmp_discovery():
     if os.getenv('RUN_PMP_API_DISCOVERY','').strip()!='1':
         return
@@ -202,6 +233,7 @@ def _boot():
     _maybe_run_pmp_discovery()
     _maybe_run_current_product_category_audit()
     _maybe_run_family_category_audit_v5()
+    _maybe_run_category_rule_audit_v6()
     print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in ('GOOGLE_SERVICE_ACCOUNT_JSON','SHOPIFY_CLIENT_ID','SHOPIFY_CLIENT_SECRET','DATABASE_URL')},sort_keys=True),flush=True)
     restored=_restore_latest()
     if restored:
