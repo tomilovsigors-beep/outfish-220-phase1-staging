@@ -60,7 +60,7 @@ def _artifact(n,m):
 
 def _persisted_mapping_artifact(name,mime):
     try:
-        from current_product_category_audit import load_latest_artifact
+        from current_product_category_audit_v4 import load_latest_artifact
         b=load_latest_artifact(os.getenv('DATABASE_URL'),name)
         if not b: return _json({'error':'product category audit artifact unavailable'},503)
         return Response(b,status=200,mimetype=mime,headers={'Cache-Control':'no-store'})
@@ -153,7 +153,7 @@ def _maybe_run_master_write():
 def _maybe_run_current_product_category_audit():
     if os.getenv('RUN_CURRENT_PRODUCT_CATEGORY_AUDIT','').strip()!='1': return
     try:
-        from current_product_category_audit import run_audit
+        from current_product_category_audit_v4 import run_audit
         master=_master_rows(); shopify=_shopify_products(master)
         summary,_=run_audit(master,shopify,os.getenv('DATABASE_URL'))
         print('CURRENT_PRODUCT_CATEGORY_AUDIT_RESULT',json.dumps(summary,sort_keys=True),flush=True)
