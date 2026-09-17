@@ -20,13 +20,11 @@ def when_ready(server):
     def _run():
         try:
             from app import _master_rows, _shopify_products, _shopify_token
-            from current_product_category_audit_v8_probe import run_probe
-            from v8_taxonomy_apparel_diag import run as run_taxonomy_diag
+            from current_product_category_audit_v8 import run_audit
             master=_master_rows(); shopify=_shopify_products(master)
             token=_shopify_token(); domain=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
-            summary,_=run_probe(master,shopify,os.getenv('DATABASE_URL'),token=token,shop_domain=domain,top_n=30)
-            taxdiag=run_taxonomy_diag(os.getenv('DATABASE_URL'))
-            server.log.info('V8_IDENTITY_LEAF_PROBE_COMPLETE %s',json.dumps({'probe':summary,'taxonomy_diag_count':taxdiag.get('count')},sort_keys=True))
+            summary,_=run_audit(master,shopify,os.getenv('DATABASE_URL'),token=token,shop_domain=domain)
+            server.log.info('V8_FINAL_AUDIT_COMPLETE %s',json.dumps(summary,sort_keys=True))
         except Exception as exc:
-            server.log.warning('V8_IDENTITY_LEAF_PROBE_FAILED %s %s',type(exc).__name__,str(exc)[:3000])
-    threading.Thread(target=_run,daemon=True,name='v8-identity-leaf-probe').start()
+            server.log.warning('V8_FINAL_AUDIT_FAILED %s %s',type(exc).__name__,str(exc)[:4000])
+    threading.Thread(target=_run,daemon=True,name='v8-final-audit').start()
