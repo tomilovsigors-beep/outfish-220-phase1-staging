@@ -12,6 +12,34 @@ def on_starting(server):
         _base_on_starting(server)
 
 
+def _register_v9_routes(server):
+    try:
+        from flask import Response
+        from content_staging_app import app
+        from current_product_identity_audit_v9 import load_latest_artifact
+        routes={
+            '/v9/v9-family-identity-priority.csv':('v9-family-identity-priority.csv','text/csv'),
+            '/v9/v9-family-identity-audit.csv':('v9-family-identity-audit.csv','text/csv'),
+            '/v9/v9-family-evidence-gaps.csv':('v9-family-evidence-gaps.csv','text/csv'),
+            '/v9/identity_migration_evidence.csv':('identity_migration_evidence.csv','text/csv'),
+            '/v9/v9-family-split-recommendations.csv':('v9-family-split-recommendations.csv','text/csv'),
+            '/v9/v9-identity-summary.json':('v9-identity-summary.json','application/json'),
+            '/v9/v9-leaf-ready-queue.csv':('v9-leaf-ready-queue.csv','text/csv'),
+        }
+        for idx,(path,(name,mime)) in enumerate(routes.items()):
+            endpoint=f'v9_artifact_{idx}'
+            def handler(_name=name,_mime=mime):
+                b=load_latest_artifact(os.getenv('DATABASE_URL'),_name)
+                if not b:
+                    return Response(json.dumps({'error':'v9 artifact unavailable'}),status=503,mimetype='application/json')
+                return Response(b,status=200,mimetype=_mime,headers={'Cache-Control':'no-store'})
+            if endpoint not in app.view_functions:
+                app.add_url_rule(path,endpoint,handler,methods=['GET'])
+        server.log.info('V9_ARTIFACT_ROUTES_READY %s',json.dumps(sorted(routes),sort_keys=True))
+    except Exception as exc:
+        server.log.warning('V9_ARTIFACT_ROUTES_FAILED %s %s',type(exc).__name__,str(exc)[:2000])
+
+
 def _install_batched_exact_lookup(mod, server):
     def _lookup_skus(token, domain, skus):
         out={}; ambiguous={}; total=len(skus)
@@ -34,6 +62,7 @@ def _install_batched_exact_lookup(mod, server):
 
 
 def when_ready(server):
+    _register_v9_routes(server)
     run_v9=os.getenv('RUN_V9_IDENTITY_AUDIT','').strip()=='1'
     if run_v9:
         server.log.info('V9_IDENTITY_AUDIT_HOOK_START')
