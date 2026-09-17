@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json, os
+import json
 import requests
 
 import current_product_category_audit as v3
@@ -35,8 +35,10 @@ def _ean_diag(master_ean, live_barcode, vendor):
         return 'LIVE_BARCODE_BLANK'
     if me==lb:
         return 'EAN_EXACT'
-    if vendor.casefold()=='fhm' and me.startswith('46') and lb.startswith('475'):
-        return 'FHM_EAN_MIGRATION_46_TO_475_OBSERVED'
+    if vendor.casefold()=='fhm' and me.startswith('475') and lb.startswith('46'):
+        return 'FHM_LEGACY_46_TO_CURRENT_475_OBSERVED'
+    if vendor.casefold()=='fhm' and me.startswith('475') and lb.startswith('475'):
+        return 'FHM_475_BARCODE_DIFF_AUXILIARY_ONLY'
     return 'EAN_DIFF_AUXILIARY_ONLY'
 
 
@@ -75,8 +77,12 @@ def _validate_rule_sku(spec,groups,by_cat,shopify):
     ean_trail=[]
     for m in members:
         sku=v3._norm(m.get('220_sku')); lv=live_by_sku.get(sku) or {}
-        ean_trail.append({'sku':sku,'master_220_ean':v3._norm(m.get('220_ean')),'live_shopify_barcode':v3._norm(lv.get('barcode')),
-                          'status':_ean_diag(m.get('220_ean'),lv.get('barcode'),spec['vendor'])})
+        ean_trail.append({
+            'sku':sku,
+            'master_220_ean':v3._norm(m.get('220_ean')),
+            'live_shopify_barcode':v3._norm(lv.get('barcode')),
+            'status':_ean_diag(m.get('220_ean'),lv.get('barcode'),spec['vendor'])
+        })
 
     cat=by_cat.get(spec['phh_category_id'])
     if not cat: errors.append('PHH category missing')
@@ -95,14 +101,29 @@ def run_audit(master_rows,shopify,db,token=None,shop_domain=None):
     product_ids=[x['shopify_product_id'] for x in v7.RULE_SPECS]
     if token and shop_domain:
         enrich_live_variant_identity(shopify,token,shop_domain,product_ids)
-    old=v7._validate_rule
+
+    original_validate=v7._validate_rule
+    original_identity={x['rule_id']:x.get('required_identity_signals','') for x in v7.RULE_SPECS}
+    original_sources={x['rule_id']:x.get('evidence_sources','') for x in v7.RULE_SPECS}
+    for spec in v7.RULE_SPECS:
+        spec['required_identity_signals']='same Shopify product GID; exact Master family SKU set equals exact live Shopify variant SKU set; canonical 220_sku+220_ean remains unique; grouping PASS; Shopify variant_id is supplementary and may be sparse'
+        spec['evidence_sources']=spec.get('evidence_sources','')+'; live Shopify variant SKU/barcode read-only identity check; FHM legacy 46... vs current 475... EAN difference recorded as auxiliary migration evidence only'
     v7._validate_rule=_validate_rule_sku
     try:
         summary,artifacts=v7.run_audit(master_rows,shopify,db)
     finally:
-        v7._validate_rule=old
+        v7._validate_rule=original_validate
+        for spec in v7.RULE_SPECS:
+            spec['required_identity_signals']=original_identity[spec['rule_id']]
+            spec['evidence_sources']=original_sources[spec['rule_id']]
+
     trails={}
+    counts={}
     for spec in v7.RULE_SPECS:
-        trails[spec['rule_id']]=(shopify.get(spec['shopify_product_id']) or {}).get('_v7_ean_trail') or []
-    print('V7_FHM_EAN_MIGRATION_DIAG '+json.dumps(trails,ensure_ascii=False,sort_keys=True),flush=True)
+        trail=(shopify.get(spec['shopify_product_id']) or {}).get('_v7_ean_trail') or []
+        trails[spec['rule_id']]=trail
+        c={}
+        for row in trail: c[row['status']]=c.get(row['status'],0)+1
+        counts[spec['rule_id']]=c
+    print('V7_FHM_EAN_MIGRATION_DIAG '+json.dumps({'counts':counts,'rows':trails},ensure_ascii=False,sort_keys=True),flush=True)
     return summary,artifacts
