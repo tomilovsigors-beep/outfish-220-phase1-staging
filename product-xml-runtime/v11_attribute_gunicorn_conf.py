@@ -47,4 +47,14 @@ def when_ready(server):
             except Exception as exc:
                 server.log.warning('V11_ATTRIBUTE_SOURCE_AUDIT_FAILED %s %s',type(exc).__name__,str(exc)[:6000])
         threading.Thread(target=_audit,daemon=True,name='v11-attribute-source-audit').start()
+    elif os.getenv('RUN_V11_ATTRIBUTE_UNKNOWN_PROBE','').strip()=='1':
+        server.log.info('V11_ATTRIBUTE_UNKNOWN_PROBE_HOOK_START')
+        def _probe():
+            try:
+                from current_product_attribute_unknown_probe_v11b import run
+                out=run(os.getenv('DATABASE_URL'))
+                server.log.info('V11_ATTRIBUTE_UNKNOWN_PROBE_COMPLETE %s',json.dumps({'status':out.get('status'),'unknown_occurrences':out.get('unknown_occurrences'),'unique_unknown_category_fields':out.get('unique_unknown_category_fields')},sort_keys=True))
+            except Exception as exc:
+                server.log.warning('V11_ATTRIBUTE_UNKNOWN_PROBE_FAILED %s %s',type(exc).__name__,str(exc)[:6000])
+        threading.Thread(target=_probe,daemon=True,name='v11-attribute-unknown-probe').start()
     if _base_when_ready: _base_when_ready(server)
