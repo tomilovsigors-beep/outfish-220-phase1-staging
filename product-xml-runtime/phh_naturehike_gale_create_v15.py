@@ -30,7 +30,7 @@ PAYLOAD={
     {'name':'Nūjas materiāls','value':'3K oglekļa šķiedra, 7075 alumīnija sakausējums'},
     {'name':'Roktura materiāls','value':'EVA'},
     {'name':'Sniega uzgaļi','value':'Jā'},
-    {'name':'Tips','value':'Trekinga nūja'},
+    {'name':'Tips','value':'Trekking'},
   ],
   'modifications':[{
     'sku':SKU,
