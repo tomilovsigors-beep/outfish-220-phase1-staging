@@ -329,7 +329,17 @@ def _maybe_run_phh_field_capabilities_v21():
     except Exception as e:
         print('PHH_FIELD_CAPABILITIES_V21_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+
+def _maybe_run_phh_gale_autocheck_now_v22():
+    if os.getenv('RUN_PHH_GALE_AUTOCHECK_NOW_V22','').strip()!='1': return
+    try:
+        from phh_gale_autocheck_now_v22 import run
+        run()
+    except Exception as e:
+        print('PHH_GALE_AUTOCHECK_NOW_V22_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_phh_gale_autocheck_now_v22()
     _maybe_run_phh_field_capabilities_v21()
     _maybe_run_naturehike_gale_full_patch_v20()
     _maybe_run_phh_product_import_schema_v19()
