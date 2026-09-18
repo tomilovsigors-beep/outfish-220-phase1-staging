@@ -6,6 +6,7 @@ PRODUCT_ID=269889165
 MOD_ID=297272175
 EAN='6975641883678'
 SELLER_ID=9990696
+PIGU_EXTERNAL_ID=8817510854
 
 def _op_summary(spec):
     out=[]
@@ -29,7 +30,7 @@ def run():
     candidates=[
       f'/v3/product-modification/{MOD_ID}/auto-check-errors',
       f'/v3/product-modifications/{MOD_ID}/auto-check-errors',
-      f'/v3/product-modification/pigu-external-id/{MOD_ID}/auto-check-errors',
+      f'/v3/product-modification/pigu-external-id/{PIGU_EXTERNAL_ID}/auto-check-errors',
       f'/v3/products/{PRODUCT_ID}',
       f'/v3/products/{PRODUCT_ID}/modifications',
       f'/v3/products/product-modifications/barcodes?ean={EAN}',
