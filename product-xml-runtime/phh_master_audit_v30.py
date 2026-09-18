@@ -4,7 +4,8 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urljoin
 from pmp_api_probe import BASE,_api_login,_api_get
-from app import _master_rows
+from google.oauth2 import service_account
+from google.auth.transport.requests import AuthorizedSession
 
 SELLER_ID='9990696'
 
@@ -94,10 +95,33 @@ def persist(rows,summary):
     except Exception as e:
         print('PHH_MASTER_AUDIT_PERSIST_FAILED',type(e).__name__,str(e),flush=True)
 
+def _master_rows_full():
+    sheet_id=os.getenv('MASTER_SHEET_ID','1xBVjjcLYqiQvy2nLtl-tGt8w_7FWefWxFa2Ltthq-7I')
+    sa=os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
+    if not sa: raise RuntimeError('GOOGLE_SERVICE_ACCOUNT_JSON missing')
+    creds=service_account.Credentials.from_service_account_info(
+        json.loads(sa),
+        scopes=['https://www.googleapis.com/auth/spreadsheets.readonly']
+    )
+    sess=AuthorizedSession(creds)
+    url=f'https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/MASTER!A1:CB4051'
+    r=sess.get(url,params={'majorDimension':'ROWS','valueRenderOption':'FORMATTED_VALUE'},timeout=60)
+    r.raise_for_status()
+    vals=(r.json() or {}).get('values') or []
+    if not vals: return []
+    headers=[str(x or '') for x in vals[0]]
+    rows=[]
+    for a in vals[1:]:
+        aa=list(a)+['']*max(0,len(headers)-len(a))
+        rows.append({headers[i]:aa[i] if i<len(aa) else '' for i in range(len(headers))})
+    return rows
+
 def run():
-    master=_master_rows()
+    master=_master_rows_full()
+    print('PHH_MASTER_AUDIT_STAGE '+json.dumps({'stage':'master_loaded','rows':len(master)}),flush=True)
     lr=_api_login('v3'); lr.raise_for_status(); token=lr.json()['token']
     offers=scan_offers(token)
+    print('PHH_MASTER_AUDIT_STAGE '+json.dumps({'stage':'offers_loaded','offers':len(offers)}),flush=True)
 
     by_ean=defaultdict(list); by_sku=defaultdict(list)
     for o in offers:
@@ -127,6 +151,7 @@ def run():
 
     lookup={}
     todo=sorted(unmatched_eans)
+    print('PHH_MASTER_AUDIT_STAGE '+json.dumps({'stage':'barcode_lookup_start','unique_eans':len(todo)}),flush=True)
     with ThreadPoolExecutor(max_workers=6) as ex:
         futs={ex.submit(lookup_ean,token,e):e for e in todo}
         done=0
