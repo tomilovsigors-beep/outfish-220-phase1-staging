@@ -248,7 +248,17 @@ def _maybe_run_naturehike_gale_probe():
     except Exception as e:
         print('NATUREHIKE_GALE_PROBE_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+
+def _maybe_run_naturehike_gale_create():
+    if os.getenv('RUN_NATUREHIKE_GALE_CREATE','').strip()!='APPROVED_ONCE': return
+    try:
+        from phh_naturehike_gale_create_v15 import run
+        run()
+    except Exception as e:
+        print('NATUREHIKE_GALE_CREATE_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_naturehike_gale_create()
     _maybe_run_naturehike_gale_probe()
     _maybe_run_pmp_discovery()
     _maybe_run_current_product_category_audit()
