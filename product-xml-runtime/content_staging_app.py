@@ -302,7 +302,17 @@ def _maybe_run_phh_gale_autocheck_v18():
     except Exception as e:
         print('PHH_GALE_AUTOCHECK_V18_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+
+def _maybe_run_phh_product_import_schema_v19():
+    if os.getenv('RUN_PHH_PRODUCT_IMPORT_SCHEMA_V19','').strip()!='1': return
+    try:
+        from phh_product_import_schema_v19 import run
+        run()
+    except Exception as e:
+        print('PHH_PRODUCT_IMPORT_SCHEMA_V19_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_phh_product_import_schema_v19()
     _maybe_run_phh_gale_autocheck_v18()
     _maybe_run_phh_gale_mod_status_v17()
     _maybe_run_naturehike_gale_offer_v16()
