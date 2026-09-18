@@ -238,7 +238,18 @@ def _maybe_run_pmp_discovery():
     except Exception as e:
         print('PMP_API_DISCOVERY_FAILED',type(e).__name__,str(e),flush=True)
 
+
+def _maybe_run_naturehike_gale_probe():
+    if os.getenv('RUN_NATUREHIKE_GALE_PROBE','').strip()!='1': return
+    try:
+        from phh_naturehike_gale_probe_v15 import run
+        out=run()
+        print('NATUREHIKE_GALE_PROBE_RESULT',json.dumps(out,ensure_ascii=False,sort_keys=True),flush=True)
+    except Exception as e:
+        print('NATUREHIKE_GALE_PROBE_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_naturehike_gale_probe()
     _maybe_run_pmp_discovery()
     _maybe_run_current_product_category_audit()
     _maybe_run_family_category_audit_v5()
