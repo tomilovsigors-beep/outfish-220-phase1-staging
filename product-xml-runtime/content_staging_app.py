@@ -266,7 +266,17 @@ def _maybe_run_naturehike_gale_patch():
     except Exception as e:
         print('NATUREHIKE_GALE_PATCH_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+
+def _maybe_run_phh_offer_contract_v16():
+    if os.getenv('RUN_PHH_OFFER_CONTRACT_V16','').strip()!='1': return
+    try:
+        from phh_offer_contract_v16 import run
+        run()
+    except Exception as e:
+        print('PHH_OFFER_CONTRACT_V16_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_phh_offer_contract_v16()
     _maybe_run_naturehike_gale_patch()
     _maybe_run_naturehike_gale_create()
     _maybe_run_naturehike_gale_probe()
