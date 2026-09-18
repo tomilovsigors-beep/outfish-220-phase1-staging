@@ -170,6 +170,15 @@ def v6_category_coverage_summary(): return _persisted_v6_artifact('v6-category-c
 @app.get('/v6-rule-audit.json')
 def v6_rule_audit(): return _persisted_v6_artifact('v6-rule-audit.json','application/json')
 
+
+@app.get('/phh-naturehike-gale-probe.json')
+def phh_naturehike_gale_probe():
+    try:
+        from phh_naturehike_gale_probe_v15 import run
+        return _json(run())
+    except Exception as e:
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {e}'},503)
+
 def _selftest_recovered_routes():
     paths=['/health','/content-summary.json','/content-dataset.csv','/image-audit.csv','/weight-audit.csv','/grouping-audit.csv','/title-qa.csv','/master-bulk-write-proposal.csv']
     with app.test_client() as c: statuses={p:c.get(p).status_code for p in paths}
