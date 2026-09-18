@@ -409,7 +409,23 @@ def _maybe_run_phh_master_audit_v30():
     except Exception as e:
         print('PHH_MASTER_AUDIT_V30_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+
+def _maybe_run_phh_offer_identity_export_v31():
+    if os.getenv('RUN_PHH_OFFER_IDENTITY_EXPORT_V31','').strip()!='1': return
+    try:
+        from phh_orphan_offer_export_v31 import run
+        out=run()
+        offers=out.get('offers') or []
+        print('PHH_OFFER_IDENTITY_EXPORT_V31_SUMMARY',json.dumps({k:out.get(k) for k in ('status','seller_id','app_name','offer_count','unique_eans','writes')},sort_keys=True),flush=True)
+        chunk=100
+        total=(len(offers)+chunk-1)//chunk
+        for i in range(total):
+            print(f'PHH_OFFER_IDENTITY_EXPORT_V31 {i+1}/{total} '+json.dumps(offers[i*chunk:(i+1)*chunk],ensure_ascii=False,separators=(',',':')),flush=True)
+    except Exception as e:
+        print('PHH_OFFER_IDENTITY_EXPORT_V31_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_phh_offer_identity_export_v31()
     _maybe_run_phh_master_audit_v30()
     _maybe_run_phh_barcode_check_test_v29()
     _maybe_run_phh_barcode_check_schema_v28()
