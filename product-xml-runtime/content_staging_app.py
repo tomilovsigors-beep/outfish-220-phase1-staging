@@ -374,7 +374,17 @@ def _maybe_run_phh_audit_ops_v27():
     except Exception as e:
         print('PHH_AUDIT_OPS_V27_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+
+def _maybe_run_phh_barcode_check_schema_v28():
+    if os.getenv('RUN_PHH_BARCODE_CHECK_SCHEMA_V28','').strip()!='1': return
+    try:
+        from phh_barcode_check_schema_v28 import run
+        run()
+    except Exception as e:
+        print('PHH_BARCODE_CHECK_SCHEMA_V28_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_phh_barcode_check_schema_v28()
     _maybe_run_phh_audit_ops_v27()
     _maybe_run_phh_existence_check_v26()
     _maybe_run_phh_image_paths_v24()
