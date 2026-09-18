@@ -433,7 +433,17 @@ def _maybe_run_phh_identity_migration_audit_v32():
     except Exception as e:
         print('PHH_IDENTITY_MIGRATION_AUDIT_V32_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+
+def _maybe_run_phh_card_identity_probe_v33():
+    if os.getenv('RUN_PHH_CARD_IDENTITY_PROBE_V33','').strip()!='1': return
+    try:
+        from phh_card_identity_probe_v33 import run
+        run()
+    except Exception as e:
+        print('PHH_CARD_IDENTITY_PROBE_V33_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_phh_card_identity_probe_v33()
     _maybe_run_phh_identity_migration_audit_v32()
     _maybe_run_phh_offer_identity_export_v31()
     _maybe_run_phh_master_audit_v30()
