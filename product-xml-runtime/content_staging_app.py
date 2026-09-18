@@ -356,7 +356,17 @@ def _maybe_run_phh_image_paths_v24():
     except Exception as e:
         print('PHH_IMAGE_PATHS_V24_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+
+def _maybe_run_phh_existence_check_v26():
+    if os.getenv('RUN_PHH_EXISTENCE_CHECK_V26','').strip()!='1': return
+    try:
+        from phh_existence_check_v26 import run
+        run()
+    except Exception as e:
+        print('PHH_EXISTENCE_CHECK_V26_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_phh_existence_check_v26()
     _maybe_run_phh_image_paths_v24()
     _maybe_run_phh_feature_value_ops_v23()
     _maybe_run_phh_gale_autocheck_now_v22()
