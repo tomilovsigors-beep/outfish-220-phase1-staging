@@ -424,7 +424,17 @@ def _maybe_run_phh_offer_identity_export_v31():
     except Exception as e:
         print('PHH_OFFER_IDENTITY_EXPORT_V31_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+
+def _maybe_run_phh_identity_migration_audit_v32():
+    if os.getenv('RUN_PHH_IDENTITY_MIGRATION_AUDIT_V32','').strip()!='1': return
+    try:
+        from phh_identity_migration_audit_v32 import run
+        run()
+    except Exception as e:
+        print('PHH_IDENTITY_MIGRATION_AUDIT_V32_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_phh_identity_migration_audit_v32()
     _maybe_run_phh_offer_identity_export_v31()
     _maybe_run_phh_master_audit_v30()
     _maybe_run_phh_barcode_check_test_v29()
