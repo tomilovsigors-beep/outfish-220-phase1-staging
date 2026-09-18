@@ -17,7 +17,7 @@ DESCRIPTION_LV=(
     'Komplektā ir divi maināmi uzgaļi, tostarp plats uzgalis sniegam un mīkstam segumam. '
     'Krāsa: Deep Space Gray. Modelis: CNK2450DS012.'
 )
-IMAGE='https://cdn.shopify.com/s/files/1/0771/7188/4370/files/Untitleddesign-2026-08-05T002348.997.jpg?v=1785878644'
+IMAGE='https://cdn.shopify.com/s/files/1/0771/7188/4370/files/Untitleddesign-2026-08-05T002348.997.jpg'
 
 PAYLOAD={
   'category_id':4205,
