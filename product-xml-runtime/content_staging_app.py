@@ -171,6 +171,14 @@ def v6_category_coverage_summary(): return _persisted_v6_artifact('v6-category-c
 def v6_rule_audit(): return _persisted_v6_artifact('v6-rule-audit.json','application/json')
 
 
+@app.get('/phh-offer-identity-export-v31.json')
+def phh_offer_identity_export_v31():
+    try:
+        from phh_orphan_offer_export_v31 import run
+        return _json(run())
+    except Exception as e:
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {e}'},503)
+
 @app.get('/phh-naturehike-gale-probe.json')
 def phh_naturehike_gale_probe():
     try:
