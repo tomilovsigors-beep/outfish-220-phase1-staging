@@ -311,7 +311,17 @@ def _maybe_run_phh_product_import_schema_v19():
     except Exception as e:
         print('PHH_PRODUCT_IMPORT_SCHEMA_V19_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+
+def _maybe_run_naturehike_gale_full_patch_v20():
+    if os.getenv('RUN_NATUREHIKE_GALE_FULL_PATCH','').strip()!='APPROVED_ONCE': return
+    try:
+        from phh_naturehike_gale_full_patch_v20 import run
+        run()
+    except Exception as e:
+        print('PHH_NATUREHIKE_GALE_FULL_PATCH_V20_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _boot():
+    _maybe_run_naturehike_gale_full_patch_v20()
     _maybe_run_phh_product_import_schema_v19()
     _maybe_run_phh_gale_autocheck_v18()
     _maybe_run_phh_gale_mod_status_v17()
