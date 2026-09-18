@@ -11,9 +11,12 @@ def _prefix(e):
     return e[:3] if len(e)>=3 else e
 
 def run():
+    print('PHH_IDENTITY_MIGRATION_AUDIT_V32_STAGE '+json.dumps({'stage':'start'}),flush=True)
     master=_master_rows_full()
+    print('PHH_IDENTITY_MIGRATION_AUDIT_V32_STAGE '+json.dumps({'stage':'master_loaded','rows':len(master)}),flush=True)
     lr=_api_login('v3'); lr.raise_for_status(); token=lr.json()['token']
     offers=scan_offers(token)
+    print('PHH_IDENTITY_MIGRATION_AUDIT_V32_STAGE '+json.dumps({'stage':'offers_loaded','offers':len(offers)}),flush=True)
     by_ean=defaultdict(list); by_sku=defaultdict(list)
     for o in offers:
         for e in _offer_eans(o): by_ean[e].append(o)
@@ -69,13 +72,17 @@ def run():
             for e in _offer_eans(o):
                 if e and e.isdigit(): lookup_eans.add(e)
 
+    print('PHH_IDENTITY_MIGRATION_AUDIT_V32_STAGE '+json.dumps({'stage':'targets_built','targets':len(targets),'lookup_eans':len(lookup_eans)}),flush=True)
     lookup={}
     with ThreadPoolExecutor(max_workers=6) as ex:
         futs={ex.submit(lookup_ean,token,e):e for e in sorted(lookup_eans)}
+        done=0
         for f in as_completed(futs):
             e=futs[f]
             try: lookup[e]=f.result()
             except Exception as er: lookup[e]={'exists_220':False,'http':0,'error':f'{type(er).__name__}: {er}','items':[]}
+            done+=1
+            if done%100==0 or done==len(futs): print('PHH_IDENTITY_MIGRATION_AUDIT_V32_PROGRESS '+json.dumps({'done':done,'total':len(futs)}),flush=True)
 
     rows=[]; classes=Counter(); fhm_classes=Counter()
     for t in targets:
