@@ -442,6 +442,14 @@ def _maybe_run_phh_stock_publish_v40():
     except Exception as e:
         print('PHH_STOCK_PUBLISH_V40_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
+def _maybe_run_phh_import_schema_probe():
+    if os.getenv('RUN_PHH_IMPORT_SCHEMA_PROBE','').strip()!='1': return
+    try:
+        from phh_import_schema_probe import run
+        run()
+    except Exception as e:
+        print('PHH_IMPORT_SCHEMA_PROBE_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _maybe_run_phh_import_contract_probe():
     if os.getenv('RUN_PHH_IMPORT_CONTRACT_PROBE','').strip()!='1': return
     try:
@@ -515,6 +523,7 @@ def _maybe_run_phh_card_identity_probe_v33():
         print('PHH_CARD_IDENTITY_PROBE_V33_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 def _boot():
+    _maybe_run_phh_import_schema_probe()
     _maybe_run_phh_import_contract_probe()
     _maybe_run_phh_stock_publish_v40()
     _maybe_run_phh_offer_write_contract_probe()
