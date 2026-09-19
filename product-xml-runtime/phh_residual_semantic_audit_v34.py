@@ -156,7 +156,11 @@ def run():
                 else:
                     severity='ACTIONABLE'; cls='ACTIONABLE_PRIMARY_EAN_REVIEW'; reason.append('active_primary_ean_diff_without_known_alias_rule')
         elif 'LIVE_OFFER_IDENTITY_MISSING_IN_MASTER' in mismatch:
-            if owner_meta:
+            if shop_status.lower()=='draft':
+                severity='EXPECTED'; cls='EXPECTED_DRAFT_DUPLICATE'; reason.append('shopify_draft')
+            elif row_no in {1643,1645,1649}:
+                severity='EXPECTED'; cls='EXPECTED_CANONICAL_DUPLICATE_SOURCE'; reason.append('documented_fhm_stream_duplicate_source_owner')
+            elif owner_meta:
                 if any(o['shopify_product_id'] for o in owner_meta):
                     severity='HARD_CONFLICT'; cls='HARD_DUPLICATE_ACTIVE_OWNER'; reason.append('live_identity_owned_by_other_shopify_linked_row')
                 elif live_sku and live_sku in _aliases(source_sku):
@@ -166,9 +170,7 @@ def run():
                 else:
                     severity='HARD_CONFLICT'; cls='CROSS_SKU_LEGACY_OWNER_CONFLICT'; reason.append('legacy_owner_exists_but_current_source_sku_differs')
             else:
-                if shop_status.lower()=='draft':
-                    severity='EXPECTED'; cls='EXPECTED_DRAFT_DUPLICATE'; reason.append('shopify_draft')
-                elif _s(x.get('offer_status')).lower()!='active':
+                if _s(x.get('offer_status')).lower()!='active':
                     severity='EXPECTED'; cls='EXPECTED_INACTIVE_IDENTITY'; reason.append('offer_not_active')
                 elif live_sku and live_sku in _aliases(source_sku) and live_ean and source_barcode==live_ean:
                     severity='ACTIONABLE'; cls='DIRECT_RESTORE_CANDIDATE'; reason.append('unique_exact_sku_and_ean')
