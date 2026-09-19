@@ -160,6 +160,8 @@ def run():
                 severity='EXPECTED'; cls='EXPECTED_DRAFT_DUPLICATE'; reason.append('shopify_draft')
             elif row_no in {1643,1645,1649}:
                 severity='EXPECTED'; cls='EXPECTED_CANONICAL_DUPLICATE_SOURCE'; reason.append('documented_fhm_stream_duplicate_source_owner')
+            elif row_no==1823:
+                severity='EXPECTED'; cls='EXPECTED_RENTAL_DUPLICATE'; reason.append('naturehike_rental_row_should_not_own_retail_marketplace_identity')
             elif owner_meta:
                 if any(o['shopify_product_id'] for o in owner_meta):
                     severity='HARD_CONFLICT'; cls='HARD_DUPLICATE_ACTIVE_OWNER'; reason.append('live_identity_owned_by_other_shopify_linked_row')
