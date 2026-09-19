@@ -434,6 +434,14 @@ def _maybe_run_phh_identity_migration_audit_v32():
         print('PHH_IDENTITY_MIGRATION_AUDIT_V32_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 
+def _maybe_run_phh_stock_feed_readiness_v37():
+    if os.getenv('RUN_PHH_STOCK_FEED_READINESS_V37','').strip()!='1': return
+    try:
+        from phh_stock_feed_readiness_v37 import run
+        run()
+    except Exception as e:
+        print('PHH_STOCK_FEED_READINESS_V37_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _maybe_run_phh_identity_automation_gate_v36():
     if os.getenv('RUN_PHH_IDENTITY_AUTOMATION_GATE_V36','').strip()!='1': return
     try:
@@ -467,6 +475,7 @@ def _maybe_run_phh_card_identity_probe_v33():
         print('PHH_CARD_IDENTITY_PROBE_V33_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 def _boot():
+    _maybe_run_phh_stock_feed_readiness_v37()
     _maybe_run_phh_residual_semantic_audit_v34()
     _maybe_run_phh_hard_conflict_registry_v35()
     _maybe_run_phh_identity_automation_gate_v36()
