@@ -434,6 +434,14 @@ def _maybe_run_phh_identity_migration_audit_v32():
         print('PHH_IDENTITY_MIGRATION_AUDIT_V32_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 
+def _maybe_run_phh_hard_conflict_registry_v35():
+    if os.getenv('RUN_PHH_HARD_CONFLICT_REGISTRY_V35','').strip()!='1': return
+    try:
+        from phh_hard_conflict_registry_v35 import run
+        run()
+    except Exception as e:
+        print('PHH_HARD_CONFLICT_REGISTRY_V35_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
 def _maybe_run_phh_residual_semantic_audit_v34():
     if os.getenv('RUN_PHH_RESIDUAL_SEMANTIC_AUDIT_V34','').strip()!='1': return
     try:
@@ -451,6 +459,7 @@ def _maybe_run_phh_card_identity_probe_v33():
         print('PHH_CARD_IDENTITY_PROBE_V33_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 def _boot():
+    _maybe_run_phh_hard_conflict_registry_v35()
     _maybe_run_phh_residual_semantic_audit_v34()
     _maybe_run_phh_card_identity_probe_v33()
     _maybe_run_phh_identity_migration_audit_v32()
