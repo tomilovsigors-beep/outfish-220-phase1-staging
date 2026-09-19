@@ -467,9 +467,9 @@ def _maybe_run_phh_card_identity_probe_v33():
         print('PHH_CARD_IDENTITY_PROBE_V33_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 def _boot():
-    _maybe_run_phh_identity_automation_gate_v36()
-    _maybe_run_phh_hard_conflict_registry_v35()
     _maybe_run_phh_residual_semantic_audit_v34()
+    _maybe_run_phh_hard_conflict_registry_v35()
+    _maybe_run_phh_identity_automation_gate_v36()
     _maybe_run_phh_card_identity_probe_v33()
     _maybe_run_phh_identity_migration_audit_v32()
     _maybe_run_phh_offer_identity_export_v31()
