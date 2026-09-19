@@ -147,6 +147,8 @@ def run():
                 other=[r for r in ean_any.get(live_ean,[]) if r!=row_no]
                 if other:
                     severity='HARD_CONFLICT'; cls='HARD_CROSS_ROW_EAN_CONFLICT'; reason.append('live_ean_present_on_other_master_row')
+                elif not _s(m.get('shopify_product_id')) and not source_sku and master_sku:
+                    severity='MANUAL'; cls='LEGACY_IDENTITY_PRIMARY_EAN_REVIEW'; reason.append('legacy_identity_only_row_requires_lineage_evidence')
                 elif vendor.upper()=='SIGG' and live_ean.startswith('222'):
                     severity='MANUAL'; cls='SIGG_MULTI_EAN_PRIMARY_REVIEW'; reason.append('sigg_internal_222_primary_ean')
                 elif vendor.upper()=='THERMOWAVE' and source_barcode==master_ean:
