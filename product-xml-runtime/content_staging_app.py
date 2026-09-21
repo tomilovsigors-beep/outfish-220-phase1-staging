@@ -76,6 +76,24 @@ def _persisted_v5_artifact(name,mime):
     except Exception as e:
         return _json({'error':'v5 family category audit artifact unavailable','detail':f'{type(e).__name__}: {e}'},503)
 
+def _persisted_v10_artifact(name,mime):
+    try:
+        from current_product_category_audit_v10 import load_latest_artifact
+        b=load_latest_artifact(os.getenv('DATABASE_URL'),name)
+        if not b: return _json({'error':'v10 category audit artifact unavailable'},503)
+        return Response(b,status=200,mimetype=mime,headers={'Cache-Control':'no-store'})
+    except Exception as e:
+        return _json({'error':'v10 category audit artifact unavailable','detail':f'{type(e).__name__}: {e}'},503)
+
+def _persisted_v11_artifact(name,mime):
+    try:
+        from current_product_attribute_audit_v11 import load_latest_artifact
+        b=load_latest_artifact(os.getenv('DATABASE_URL'),name)
+        if not b: return _json({'error':'v11 attribute audit artifact unavailable'},503)
+        return Response(b,status=200,mimetype=mime,headers={'Cache-Control':'no-store'})
+    except Exception as e:
+        return _json({'error':'v11 attribute audit artifact unavailable','detail':f'{type(e).__name__}: {e}'},503)
+
 def _persisted_v6_artifact(name,mime):
     try:
         from current_product_category_audit_v6 import load_latest_artifact
@@ -170,6 +188,13 @@ def v6_category_coverage_summary(): return _persisted_v6_artifact('v6-category-c
 @app.get('/v6-rule-audit.json')
 def v6_rule_audit(): return _persisted_v6_artifact('v6-rule-audit.json','application/json')
 
+
+@app.get('/v10/v10-product-category-mapping.csv')
+def v10_product_category_mapping(): return _persisted_v10_artifact('v10-product-category-mapping.csv','text/csv')
+@app.get('/v11/v11-product-attribute-readiness.csv')
+def v11_product_attribute_readiness(): return _persisted_v11_artifact('v11-product-attribute-readiness.csv','text/csv')
+@app.get('/v11/v11-product-required-attributes.csv')
+def v11_product_required_attributes(): return _persisted_v11_artifact('v11-product-required-attributes.csv','text/csv')
 
 @app.get('/phh-offer-identity-export-v31.json')
 def phh_offer_identity_export_v31():
