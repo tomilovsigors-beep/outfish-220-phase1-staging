@@ -203,6 +203,14 @@ def full_catalog_refresh():
         arts,summary=run_full_catalog_audit()
         with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='ok',error=None,summary=summary,artifacts=arts)
         print('FULL_CATALOG_AUDIT_RESULT',json.dumps(summary,sort_keys=True),flush=True)
+        try:
+            import csv as _csv, io as _io
+            _raw=(arts.get('full-catalog-ready-candidates.csv') or b'').decode('utf-8-sig')
+            _rows=list(_csv.DictReader(_io.StringIO(_raw)))[:10]
+            _top=[{k:r.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_name','product_type','shopify_title','featured_image_url')} for r in _rows]
+            print('FULL_CATALOG_CREATE_CANDIDATES_TOP10',json.dumps(_top,ensure_ascii=False,separators=(',',':')),flush=True)
+        except Exception as e:
+            print('FULL_CATALOG_CREATE_CANDIDATES_TOP10_FAILED',type(e).__name__,str(e),flush=True)
         return _json(summary)
     except Exception as e:
         with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='error',error=f'{type(e).__name__}: {e}')
