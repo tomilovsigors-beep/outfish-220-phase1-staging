@@ -80,7 +80,7 @@ def run():
         row={**v,'reconciliation_status':status,'match_basis':match_basis,'master_row':candidates[0][0] if len(candidates)==1 else '','reasons':'|'.join(reasons)}
         rec.append(row)
         candidate_blockers=list(reasons)
-        if status!='MATCHED': candidate_blockers.append('RECONCILIATION_'+status)
+        # NEW is a valid Product XML discovery state: PHH existence decides CREATE vs SKIP.\n        # Only ambiguous/duplicate reconciliation is unsafe and must stop before PHH identity gating.\n        if status not in ('MATCHED','NEW'): candidate_blockers.append('RECONCILIATION_'+status)
         if v['shopify_status']!='ACTIVE': candidate_blockers.append('SHOPIFY_NOT_ACTIVE')
         if not v['shopify_title']: candidate_blockers.append('MISSING_TITLE')
         if v['description_present']!='YES': candidate_blockers.append('MISSING_DESCRIPTION')
