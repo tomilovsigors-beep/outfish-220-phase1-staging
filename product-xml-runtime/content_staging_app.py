@@ -223,6 +223,14 @@ def full_catalog_ready_candidates(): return _full_catalog_artifact('full-catalog
 @app.get('/full-catalog/exceptions.csv')
 def full_catalog_exceptions(): return _full_catalog_artifact('full-catalog-exceptions.csv','text/csv')
 
+@app.get('/phh-feature-value-ops-v23.json')
+def phh_feature_value_ops_v23():
+    try:
+        from phh_feature_value_ops_v23 import run
+        return _json(run())
+    except Exception as e:
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {e}'},503)
+
 @app.get('/phh-offer-identity-export-v31.json')
 def phh_offer_identity_export_v31():
     try:
