@@ -97,12 +97,26 @@ def run():
         for x in _offer_eans(o): by_ean[x].append(o)
         for x in _offer_skus(o): by_sku[x].append(o)
     identity_counts=Counter()
-    lookup_eans=sorted({
-        _norm(row.get('shopify_barcode')) for row in prelim
-        if _norm(row.get('shopify_barcode'))
-        and not by_ean.get(_norm(row.get('shopify_barcode')))
-        and not by_sku.get(_norm(row.get('shopify_sku')))
-    })
+    # Pilot mode: prioritize clean NEW non-FHM rows and bound slow PHH barcode checks.
+    # Unchecked rows are explicitly deferred, never assumed absent from 220.
+    pilot_lookup_limit=max(1,int(os.getenv('FULL_CATALOG_IDENTITY_LOOKUP_LIMIT','200')))
+    lookup_priority=sorted(
+        (row for row in prelim
+         if _norm(row.get('shopify_barcode'))
+         and not by_ean.get(_norm(row.get('shopify_barcode')))
+         and not by_sku.get(_norm(row.get('shopify_sku')))),
+        key=lambda row: (
+            0 if row.get('reconciliation_status')=='NEW' and _norm(row.get('vendor')).casefold()!='fhm' else 1,
+            _norm(row.get('shopify_product_id')),
+            _norm(row.get('shopify_sku'))
+        )
+    )
+    lookup_eans=[]; seen_lookup_eans=set()
+    for row in lookup_priority:
+        ean=_norm(row.get('shopify_barcode'))
+        if ean in seen_lookup_eans: continue
+        seen_lookup_eans.add(ean); lookup_eans.append(ean)
+        if len(lookup_eans)>=pilot_lookup_limit: break
     barcode_lookup={}
     with ThreadPoolExecutor(max_workers=6) as pool:
         futures={pool.submit(lookup_ean,phh_token,ean):ean for ean in lookup_eans}
@@ -116,7 +130,11 @@ def run():
         if not offer_matches and sku: offer_matches=list(by_sku.get(sku,[]))
         exists=bool(offer_matches); lookup_http=''; identity_basis='SELLER_OFFER' if exists else ''
         if not exists and ean:
-            q=barcode_lookup.get(ean,{'exists_220':False,'http':0,'error':'lookup missing','items':[]}); lookup_http=q.get('http','')
+            if ean not in barcode_lookup:
+                identity_counts['IDENTITY_DEFERRED']+=1
+                exc.append({**row,'identity_status':'IDENTITY_DEFERRED','identity_basis':'PILOT_LIMIT','phh_lookup_http':'','candidate_blockers':'IDENTITY_DEFERRED'})
+                continue
+            q=barcode_lookup[ean]; lookup_http=q.get('http','')
             if q.get('http') not in (200,404):
                 identity_counts['IDENTITY_EXCEPTION']+=1
                 exc.append({**row,'identity_status':'IDENTITY_EXCEPTION','identity_basis':'BARCODE_LOOKUP','phh_lookup_http':lookup_http,'candidate_blockers':'IDENTITY_EXCEPTION'})
@@ -142,7 +160,7 @@ def run():
     for x in exc:
         for k in x:
             if k not in exc_fields: exc_fields.append(k)
-    summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
+    summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
     return {
         'full-catalog-summary.json':_json(summary),
         'full-catalog-reconciliation.csv':_csv(rec,rec_fields),
