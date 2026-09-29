@@ -204,6 +204,25 @@ def full_catalog_refresh():
         with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='ok',error=None,summary=summary,artifacts=arts)
         print('FULL_CATALOG_AUDIT_RESULT',json.dumps(summary,sort_keys=True),flush=True)
         try:
+            import current_product_category_audit as _cat
+            _ts,_cats,_attrs=_cat._latest_taxonomy(DB)
+            _req={}
+            for _a in _attrs:
+                if str(_a.get('required')).casefold() in {'true','1','yes'}:
+                    _req.setdefault(str(_a.get('category_id')),[]).append({k:_a.get(k,'') for k in ('field_id','title_en','title_lv','title_ru','required')})
+            _terms=('paracord','utility cord','utility cords','rope','cord')
+            _hits=[]
+            for _x in _cats:
+                if str(_x.get('allow_add_products')).casefold() not in {'true','1','yes'}: continue
+                _txt=' '.join(str(_x.get(k,'') or '') for k in ('title_en','title_lv','title_lt','title_ee','title_fi','title_ru')).casefold()
+                _matched=[t for t in _terms if t in _txt]
+                if _matched:
+                    _cid=str(_x.get('category_id'))
+                    _hits.append({'category_id':_cid,'parent_id':str(_x.get('parent_id') or ''),'title_en':_x.get('title_en',''),'title_lv':_x.get('title_lv',''),'title_ru':_x.get('title_ru',''),'matched_terms':_matched,'required_fields':_req.get(_cid,[])})
+            print('PILOT_80673_CATEGORY_PROBE',json.dumps({'sku':'80673','ean':'0021563806731','query_terms':_terms,'candidate_count':len(_hits),'candidates':_hits[:30]},ensure_ascii=False,sort_keys=True),flush=True)
+        except Exception as e:
+            print('PILOT_80673_CATEGORY_PROBE_FAILED',type(e).__name__,str(e),flush=True)
+        try:
             import csv as _csv, io as _io
             _raw=(arts.get('full-catalog-ready-candidates.csv') or b'').decode('utf-8-sig')
             _rows=list(_csv.DictReader(_io.StringIO(_raw)))[:10]
