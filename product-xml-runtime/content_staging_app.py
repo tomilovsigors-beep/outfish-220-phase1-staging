@@ -416,6 +416,15 @@ def _maybe_run_phh_feature_value_ops_v23():
         print('PHH_FEATURE_VALUE_OPS_V23_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 
+def _maybe_run_pmp_import_history_mining_v11k():
+    try:
+        from pmp_import_history_mining_v11k import run
+        result=run()
+        print('PMP_IMPORT_HISTORY_MINING_V11K_RESULT',json.dumps(result,ensure_ascii=False,sort_keys=True)[:180000],flush=True)
+    except Exception as e:
+        print('PMP_IMPORT_HISTORY_MINING_V11K_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
+
 def _maybe_run_phh_image_paths_v24():
     if os.getenv('RUN_PHH_IMAGE_PATHS_V24','').strip()!='1': return
     try:
@@ -628,6 +637,7 @@ def _boot():
     _maybe_run_phh_existence_check_v26()
     _maybe_run_phh_image_paths_v24()
     _maybe_run_phh_feature_value_ops_v23()
+    _maybe_run_pmp_import_history_mining_v11k()
     _maybe_run_phh_gale_autocheck_now_v22()
     _maybe_run_phh_field_capabilities_v21()
     _maybe_run_naturehike_gale_full_patch_v20()
