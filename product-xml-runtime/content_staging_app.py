@@ -5,8 +5,9 @@ from app import _master_rows, _shopify_products, _load_json
 from generator import build
 from content_runtime import build_snapshot, persist_snapshot
 from master_bulk_write import run_controlled_master_write, EXPECTED_DATASET_HASH
+from full_catalog_audit import run as run_full_catalog_audit
 
-app=Flask(__name__); LOCK=threading.RLock(); STATE={'status':'starting','error':None,'last_refresh':None,'summary':{},'artifacts':{},'product_xml_validation':{},'persistence_ok':False,'persistence_error':None,'recovered_from_postgres':False,'master_write':None}
+app=Flask(__name__); LOCK=threading.RLock(); FULL_CATALOG_LOCK=threading.RLock(); FULL_CATALOG={'status':'not_run','error':None,'summary':{},'artifacts':{}}; STATE={'status':'starting','error':None,'last_refresh':None,'summary':{},'artifacts':{},'product_xml_validation':{},'persistence_ok':False,'persistence_error':None,'recovered_from_postgres':False,'master_write':None}
 def _json(o,status=200): return Response(json.dumps(o,indent=2,sort_keys=True),status=status,mimetype='application/json')
 def refresh():
     try:
@@ -195,6 +196,32 @@ def v10_product_category_mapping(): return _persisted_v10_artifact('v10-product-
 def v11_product_attribute_readiness(): return _persisted_v11_artifact('v11-product-attribute-readiness.csv','text/csv')
 @app.get('/v11/v11-product-required-attributes.csv')
 def v11_product_required_attributes(): return _persisted_v11_artifact('v11-product-required-attributes.csv','text/csv')
+
+@app.post('/full-catalog/refresh')
+def full_catalog_refresh():
+    try:
+        arts,summary=run_full_catalog_audit()
+        with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='ok',error=None,summary=summary,artifacts=arts)
+        print('FULL_CATALOG_AUDIT_RESULT',json.dumps(summary,sort_keys=True),flush=True)
+        return _json(summary)
+    except Exception as e:
+        with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='error',error=f'{type(e).__name__}: {e}')
+        print('FULL_CATALOG_AUDIT_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {e}'},503)
+
+def _full_catalog_artifact(name,mime):
+    with FULL_CATALOG_LOCK: b=FULL_CATALOG['artifacts'].get(name); status=FULL_CATALOG['status']; err=FULL_CATALOG['error']
+    if not b: return _json({'error':'full catalog audit artifact unavailable','status':status,'detail':err},503)
+    return Response(b,status=200,mimetype=mime,headers={'Cache-Control':'no-store'})
+
+@app.get('/full-catalog/summary.json')
+def full_catalog_summary(): return _full_catalog_artifact('full-catalog-summary.json','application/json')
+@app.get('/full-catalog/reconciliation.csv')
+def full_catalog_reconciliation(): return _full_catalog_artifact('full-catalog-reconciliation.csv','text/csv')
+@app.get('/full-catalog/ready-candidates.csv')
+def full_catalog_ready_candidates(): return _full_catalog_artifact('full-catalog-ready-candidates.csv','text/csv')
+@app.get('/full-catalog/exceptions.csv')
+def full_catalog_exceptions(): return _full_catalog_artifact('full-catalog-exceptions.csv','text/csv')
 
 @app.get('/phh-offer-identity-export-v31.json')
 def phh_offer_identity_export_v31():
