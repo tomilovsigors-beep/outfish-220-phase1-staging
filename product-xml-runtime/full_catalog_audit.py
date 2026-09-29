@@ -48,36 +48,6 @@ def _shopify_all_variants():
 def run():
     started=time.time(); master=_master_rows(); variants,pages=_shopify_all_variants()
     master_by_vid=defaultdict(list); master_by_sku=defaultdict(list); master_by_ean=defaultdict(list)
-    # Identity/existence gate MUST run before category/attributes and before FHM GTIN handling.
-    # Existing 220 cards are never CREATE candidates. New FHM is parked until Latvian GTINs are supplied.
-    lr=_api_login('v3'); lr.raise_for_status(); phh_token=lr.json()['token']
-    offers=scan_offers(phh_token)
-    by_ean=defaultdict(list); by_sku=defaultdict(list)
-    for o in offers:
-        for x in _offer_eans(o): by_ean[x].append(o)
-        for x in _offer_skus(o): by_sku[x].append(o)
-    identity_counts=Counter()
-    for row in prelim:
-        sku=_norm(row.get('shopify_sku')); ean=_norm(row.get('shopify_barcode'))
-        offer_matches=list(by_ean.get(ean,[])) if ean else []
-        if not offer_matches and sku: offer_matches=list(by_sku.get(sku,[]))
-        exists=bool(offer_matches); lookup_http=''; identity_basis='SELLER_OFFER' if exists else ''
-        if not exists and ean:
-            q=lookup_ean(phh_token,ean); lookup_http=q.get('http','')
-            if q.get('http') not in (200,404):
-                identity_counts['IDENTITY_EXCEPTION']+=1
-                exc.append({**row,'identity_status':'IDENTITY_EXCEPTION','identity_basis':'BARCODE_LOOKUP','phh_lookup_http':lookup_http,'candidate_blockers':'IDENTITY_EXCEPTION'})
-                continue
-            exists=bool(q.get('exists_220')); identity_basis='BARCODE_LOOKUP' if exists else 'BARCODE_ABSENT'
-        if exists:
-            identity_counts['SKIP_EXISTING_220']+=1
-            exc.append({**row,'identity_status':'SKIP_EXISTING_220','identity_basis':identity_basis,'phh_lookup_http':lookup_http,'candidate_blockers':'SKIP_EXISTING_220'})
-        elif _norm(row.get('vendor')).casefold()=='fhm':
-            identity_counts['FHM_GTIN_PENDING']+=1
-            exc.append({**row,'identity_status':'FHM_GTIN_PENDING','identity_basis':identity_basis or 'NOT_FOUND_220','phh_lookup_http':lookup_http,'candidate_blockers':'FHM_GTIN_PENDING'})
-        else:
-            identity_counts['CREATE_CANDIDATE']+=1
-            ready.append({**row,'identity_status':'CREATE_CANDIDATE','identity_basis':identity_basis or 'NOT_FOUND_220','phh_lookup_http':lookup_http})
     for i,m in enumerate(master,2):
         vid=_norm(m.get('shopify_variant_id')); sku=_norm(m.get('220_sku') or m.get('shopify_sku')); ean=_norm(m.get('220_ean') or m.get('shopify_barcode'))
         if vid: master_by_vid[vid].append((i,m))
@@ -117,6 +87,36 @@ def run():
         if not v['featured_image_url']: candidate_blockers.append('MISSING_FEATURED_IMAGE')
         if not candidate_blockers: prelim.append(row)
         else: exc.append({**row,'candidate_blockers':'|'.join(dict.fromkeys(candidate_blockers))})
+    # Identity/existence gate MUST run before category/attributes and before FHM GTIN handling.
+    # Existing 220 cards are never CREATE candidates. New FHM is parked until Latvian GTINs are supplied.
+    lr=_api_login('v3'); lr.raise_for_status(); phh_token=lr.json()['token']
+    offers=scan_offers(phh_token)
+    by_ean=defaultdict(list); by_sku=defaultdict(list)
+    for o in offers:
+        for x in _offer_eans(o): by_ean[x].append(o)
+        for x in _offer_skus(o): by_sku[x].append(o)
+    identity_counts=Counter()
+    for row in prelim:
+        sku=_norm(row.get('shopify_sku')); ean=_norm(row.get('shopify_barcode'))
+        offer_matches=list(by_ean.get(ean,[])) if ean else []
+        if not offer_matches and sku: offer_matches=list(by_sku.get(sku,[]))
+        exists=bool(offer_matches); lookup_http=''; identity_basis='SELLER_OFFER' if exists else ''
+        if not exists and ean:
+            q=lookup_ean(phh_token,ean); lookup_http=q.get('http','')
+            if q.get('http') not in (200,404):
+                identity_counts['IDENTITY_EXCEPTION']+=1
+                exc.append({**row,'identity_status':'IDENTITY_EXCEPTION','identity_basis':'BARCODE_LOOKUP','phh_lookup_http':lookup_http,'candidate_blockers':'IDENTITY_EXCEPTION'})
+                continue
+            exists=bool(q.get('exists_220')); identity_basis='BARCODE_LOOKUP' if exists else 'BARCODE_ABSENT'
+        if exists:
+            identity_counts['SKIP_EXISTING_220']+=1
+            exc.append({**row,'identity_status':'SKIP_EXISTING_220','identity_basis':identity_basis,'phh_lookup_http':lookup_http,'candidate_blockers':'SKIP_EXISTING_220'})
+        elif _norm(row.get('vendor')).casefold()=='fhm':
+            identity_counts['FHM_GTIN_PENDING']+=1
+            exc.append({**row,'identity_status':'FHM_GTIN_PENDING','identity_basis':identity_basis or 'NOT_FOUND_220','phh_lookup_http':lookup_http,'candidate_blockers':'FHM_GTIN_PENDING'})
+        else:
+            identity_counts['CREATE_CANDIDATE']+=1
+            ready.append({**row,'identity_status':'CREATE_CANDIDATE','identity_basis':identity_basis or 'NOT_FOUND_220','phh_lookup_http':lookup_http})
     for i,m in enumerate(master,2):
         if i in matched_master_rows: continue
         sku=_norm(m.get('220_sku') or m.get('shopify_sku')); ean=_norm(m.get('220_ean') or m.get('shopify_barcode')); vid=_norm(m.get('shopify_variant_id'))
