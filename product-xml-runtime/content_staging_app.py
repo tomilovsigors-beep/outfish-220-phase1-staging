@@ -425,6 +425,25 @@ def _maybe_run_pmp_import_history_mining_v11k():
         print('PMP_IMPORT_HISTORY_MINING_V11K_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 
+def _maybe_run_9050_contract_bundle():
+    try:
+        from pmp_category_required_fields_probe_v11n import run as required_fields_run
+        from pmp_attribute_contract_digest_v11j import run as attribute_contract_run
+        from phh_product_import_schema_v19 import run as import_schema_run
+        required_fields=required_fields_run()
+        attribute_contract=attribute_contract_run()
+        import_schema=import_schema_run()
+        print('PHH_9050_CONTRACT_BUNDLE',json.dumps({
+            'status':'PASS',
+            'required_fields_9050':required_fields.get('9050',[]),
+            'attribute_contract':attribute_contract,
+            'product_import_schema':import_schema,
+            'safety':{'marketplace_mutations':0,'writes':0}
+        },ensure_ascii=False,sort_keys=True)[:180000],flush=True)
+    except Exception as e:
+        print('PHH_9050_CONTRACT_BUNDLE_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
+
 def _maybe_run_phh_image_paths_v24():
     if os.getenv('RUN_PHH_IMAGE_PATHS_V24','').strip()!='1': return
     try:
@@ -638,6 +657,7 @@ def _boot():
     _maybe_run_phh_image_paths_v24()
     _maybe_run_phh_feature_value_ops_v23()
     _maybe_run_pmp_import_history_mining_v11k()
+    _maybe_run_9050_contract_bundle()
     _maybe_run_phh_gale_autocheck_now_v22()
     _maybe_run_phh_field_capabilities_v21()
     _maybe_run_naturehike_gale_full_patch_v20()
