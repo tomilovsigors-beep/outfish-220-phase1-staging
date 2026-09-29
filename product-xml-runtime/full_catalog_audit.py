@@ -1,0 +1,101 @@
+from __future__ import annotations
+import csv, io, json, os, time
+from collections import Counter, defaultdict
+import requests
+from app import _master_rows, _shopify_token
+
+API_VERSION='2026-07'
+
+def _norm(v): return '' if v is None else str(v).strip()
+def _csv(rows, fields):
+    s=io.StringIO(newline=''); w=csv.DictWriter(s,fieldnames=fields); w.writeheader(); w.writerows(rows)
+    return s.getvalue().encode('utf-8-sig')
+def _json(o): return json.dumps(o,sort_keys=True,indent=2,ensure_ascii=False).encode('utf-8')
+
+def _shopify_all_variants():
+    token=_shopify_token(); shop=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
+    url=f'https://{shop}/admin/api/{API_VERSION}/graphql.json'
+    query='''query FullCatalog($after:String){productVariants(first:250,after:$after,sortKey:ID){pageInfo{hasNextPage endCursor} nodes{id sku barcode title selectedOptions{name value} product{id title description vendor productType status category{id fullName} featuredMedia{... on MediaImage{image{url width height}}}}}}}'''
+    rows=[]; after=None; pages=0
+    while True:
+        r=requests.post(url,headers={'X-Shopify-Access-Token':token,'Content-Type':'application/json'},json={'query':query,'variables':{'after':after}},timeout=90)
+        r.raise_for_status(); p=r.json()
+        if p.get('errors'): raise RuntimeError('Shopify GraphQL errors: '+json.dumps(p['errors'])[:1500])
+        conn=((p.get('data') or {}).get('productVariants') or {}); nodes=conn.get('nodes') or []; pages+=1
+        for v in nodes:
+            product=v.get('product') or {}; cat=product.get('category') or {}; fm=product.get('featuredMedia') or {}; image=fm.get('image') or {}
+            rows.append({
+                'shopify_product_id':_norm(product.get('id')),'shopify_variant_id':_norm(v.get('id')),
+                'shopify_sku':_norm(v.get('sku')),'shopify_barcode':_norm(v.get('barcode')),
+                'shopify_title':_norm(product.get('title')),'variant_title':_norm(v.get('title')),
+                'vendor':_norm(product.get('vendor')),'product_type':_norm(product.get('productType')),
+                'shopify_status':_norm(product.get('status')),'shopify_category_id':_norm(cat.get('id')),
+                'shopify_category_name':_norm(cat.get('fullName')),'description_present':'YES' if _norm(product.get('description')) else 'NO',
+                'featured_image_url':_norm(image.get('url')),'featured_image_width':image.get('width') or '',
+                'featured_image_height':image.get('height') or '',
+                'selected_options_json':json.dumps(v.get('selectedOptions') or [],ensure_ascii=False,separators=(',',':'))
+            })
+        pi=conn.get('pageInfo') or {}
+        if not pi.get('hasNextPage'): break
+        nxt=pi.get('endCursor')
+        if not nxt or nxt==after: raise RuntimeError('Shopify pagination cursor did not advance')
+        after=nxt
+        if pages>10000: raise RuntimeError('Shopify pagination safety limit exceeded')
+    return rows,pages
+
+def run():
+    started=time.time(); master=_master_rows(); variants,pages=_shopify_all_variants()
+    master_by_vid=defaultdict(list); master_by_sku=defaultdict(list); master_by_ean=defaultdict(list)
+    for i,m in enumerate(master,2):
+        vid=_norm(m.get('shopify_variant_id')); sku=_norm(m.get('220_sku') or m.get('shopify_sku')); ean=_norm(m.get('220_ean') or m.get('shopify_barcode'))
+        if vid: master_by_vid[vid].append((i,m))
+        if sku: master_by_sku[sku].append((i,m))
+        if ean: master_by_ean[ean].append((i,m))
+    shop_skus=Counter(_norm(v['shopify_sku']) for v in variants if _norm(v['shopify_sku']))
+    shop_eans=Counter(_norm(v['shopify_barcode']) for v in variants if _norm(v['shopify_barcode']))
+    rec=[]; ready=[]; exc=[]; matched_master_rows=set(); counts=Counter()
+    for v in variants:
+        vid=v['shopify_variant_id']; sku=v['shopify_sku']; ean=v['shopify_barcode']; reasons=[]; candidates=[]
+        if vid and master_by_vid.get(vid): candidates=master_by_vid[vid]; match_basis='VARIANT_ID'
+        else:
+            s=master_by_sku.get(sku,[]) if sku else []; b=master_by_ean.get(ean,[]) if ean else []
+            unique={(r,m.get('shopify_variant_id','')):m for r,m in s+b}
+            candidates=[(r,m) for (r,_),m in unique.items()]
+            match_basis='SKU_EAN_FALLBACK'
+        if shop_skus.get(sku,0)>1 and sku: reasons.append('DUPLICATE_SHOPIFY_SKU')
+        if shop_eans.get(ean,0)>1 and ean: reasons.append('DUPLICATE_SHOPIFY_EAN')
+        if not sku: reasons.append('MISSING_SHOPIFY_SKU')
+        if not ean: reasons.append('MISSING_SHOPIFY_EAN')
+        if len(candidates)==0: status='NEW'
+        elif len(candidates)>1: status='AMBIGUOUS'
+        else:
+            status='MATCHED'; matched_master_rows.add(candidates[0][0])
+            m=candidates[0][1]
+            if sku and _norm(m.get('220_sku') or m.get('shopify_sku')) not in ('',sku): reasons.append('SKU_MISMATCH')
+            if ean and _norm(m.get('220_ean') or m.get('shopify_barcode')) not in ('',ean): reasons.append('EAN_MISMATCH')
+        if reasons and status=='MATCHED': status='DUPLICATE' if any(x.startswith('DUPLICATE_') for x in reasons) else 'AMBIGUOUS'
+        counts[status]+=1
+        row={**v,'reconciliation_status':status,'match_basis':match_basis,'master_row':candidates[0][0] if len(candidates)==1 else '','reasons':'|'.join(reasons)}
+        rec.append(row)
+        candidate_blockers=list(reasons)
+        if status!='MATCHED': candidate_blockers.append('RECONCILIATION_'+status)
+        if v['shopify_status']!='ACTIVE': candidate_blockers.append('SHOPIFY_NOT_ACTIVE')
+        if not v['shopify_title']: candidate_blockers.append('MISSING_TITLE')
+        if v['description_present']!='YES': candidate_blockers.append('MISSING_DESCRIPTION')
+        if not v['featured_image_url']: candidate_blockers.append('MISSING_FEATURED_IMAGE')
+        if not candidate_blockers: ready.append(row)
+        else: exc.append({**row,'candidate_blockers':'|'.join(dict.fromkeys(candidate_blockers))})
+    for i,m in enumerate(master,2):
+        if i in matched_master_rows: continue
+        sku=_norm(m.get('220_sku') or m.get('shopify_sku')); ean=_norm(m.get('220_ean') or m.get('shopify_barcode')); vid=_norm(m.get('shopify_variant_id'))
+        exc.append({'shopify_product_id':_norm(m.get('shopify_product_id')),'shopify_variant_id':vid,'shopify_sku':sku,'shopify_barcode':ean,'shopify_title':_norm(m.get('shopify_title')),'variant_title':_norm(m.get('variant_title')),'vendor':_norm(m.get('vendor')),'product_type':_norm(m.get('product_type')),'shopify_status':_norm(m.get('shopify_status')),'shopify_category_id':'','shopify_category_name':'','description_present':'','featured_image_url':'','featured_image_width':'','featured_image_height':'','selected_options_json':'','reconciliation_status':'MISSING_IN_SHOPIFY','match_basis':'','master_row':i,'reasons':'','candidate_blockers':'MISSING_IN_SHOPIFY'})
+        counts['MISSING_IN_SHOPIFY']+=1
+    rec_fields=list(rec[0]) if rec else ['shopify_variant_id','shopify_sku','shopify_barcode','reconciliation_status']
+    exc_fields=list(exc[0]) if exc else rec_fields+['candidate_blockers']
+    summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(ready),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
+    return {
+        'full-catalog-summary.json':_json(summary),
+        'full-catalog-reconciliation.csv':_csv(rec,rec_fields),
+        'full-catalog-ready-candidates.csv':_csv(ready,rec_fields),
+        'full-catalog-exceptions.csv':_csv(exc,exc_fields)
+    },summary
