@@ -197,7 +197,7 @@ def v11_product_attribute_readiness(): return _persisted_v11_artifact('v11-produ
 @app.get('/v11/v11-product-required-attributes.csv')
 def v11_product_required_attributes(): return _persisted_v11_artifact('v11-product-required-attributes.csv','text/csv')
 
-@app.post('/full-catalog/refresh')
+@app.route('/full-catalog/refresh',methods=['GET','POST'])
 def full_catalog_refresh():
     try:
         arts,summary=run_full_catalog_audit()
