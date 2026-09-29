@@ -591,6 +591,13 @@ def _maybe_run_phh_card_identity_probe_v33():
         print('PHH_CARD_IDENTITY_PROBE_V33_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 def _boot():
+    try:
+        arts,summary=run_full_catalog_audit()
+        with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='ok',error=None,summary=summary,artifacts=arts)
+        print('FULL_CATALOG_AUDIT_RESULT',json.dumps(summary,sort_keys=True),flush=True)
+    except Exception as e:
+        with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='error',error=f'{type(e).__name__}: {e}')
+        print('FULL_CATALOG_AUDIT_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
     _maybe_run_phh_offer_import_status_probe()
     _maybe_run_phh_offer_import_endpoint_probe()
     _maybe_run_phh_import_schema_probe()
