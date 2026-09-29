@@ -3,6 +3,8 @@ import csv, io, json, os, time
 from collections import Counter, defaultdict
 import requests
 from app import _master_rows, _shopify_token
+from pmp_api_probe import _api_login
+from phh_master_audit_v30 import lookup_ean, scan_offers, _offer_eans, _offer_skus
 
 API_VERSION='2026-07'
 
@@ -46,6 +48,36 @@ def _shopify_all_variants():
 def run():
     started=time.time(); master=_master_rows(); variants,pages=_shopify_all_variants()
     master_by_vid=defaultdict(list); master_by_sku=defaultdict(list); master_by_ean=defaultdict(list)
+    # Identity/existence gate MUST run before category/attributes and before FHM GTIN handling.
+    # Existing 220 cards are never CREATE candidates. New FHM is parked until Latvian GTINs are supplied.
+    lr=_api_login('v3'); lr.raise_for_status(); phh_token=lr.json()['token']
+    offers=scan_offers(phh_token)
+    by_ean=defaultdict(list); by_sku=defaultdict(list)
+    for o in offers:
+        for x in _offer_eans(o): by_ean[x].append(o)
+        for x in _offer_skus(o): by_sku[x].append(o)
+    identity_counts=Counter()
+    for row in prelim:
+        sku=_norm(row.get('shopify_sku')); ean=_norm(row.get('shopify_barcode'))
+        offer_matches=list(by_ean.get(ean,[])) if ean else []
+        if not offer_matches and sku: offer_matches=list(by_sku.get(sku,[]))
+        exists=bool(offer_matches); lookup_http=''; identity_basis='SELLER_OFFER' if exists else ''
+        if not exists and ean:
+            q=lookup_ean(phh_token,ean); lookup_http=q.get('http','')
+            if q.get('http') not in (200,404):
+                identity_counts['IDENTITY_EXCEPTION']+=1
+                exc.append({**row,'identity_status':'IDENTITY_EXCEPTION','identity_basis':'BARCODE_LOOKUP','phh_lookup_http':lookup_http,'candidate_blockers':'IDENTITY_EXCEPTION'})
+                continue
+            exists=bool(q.get('exists_220')); identity_basis='BARCODE_LOOKUP' if exists else 'BARCODE_ABSENT'
+        if exists:
+            identity_counts['SKIP_EXISTING_220']+=1
+            exc.append({**row,'identity_status':'SKIP_EXISTING_220','identity_basis':identity_basis,'phh_lookup_http':lookup_http,'candidate_blockers':'SKIP_EXISTING_220'})
+        elif _norm(row.get('vendor')).casefold()=='fhm':
+            identity_counts['FHM_GTIN_PENDING']+=1
+            exc.append({**row,'identity_status':'FHM_GTIN_PENDING','identity_basis':identity_basis or 'NOT_FOUND_220','phh_lookup_http':lookup_http,'candidate_blockers':'FHM_GTIN_PENDING'})
+        else:
+            identity_counts['CREATE_CANDIDATE']+=1
+            ready.append({**row,'identity_status':'CREATE_CANDIDATE','identity_basis':identity_basis or 'NOT_FOUND_220','phh_lookup_http':lookup_http})
     for i,m in enumerate(master,2):
         vid=_norm(m.get('shopify_variant_id')); sku=_norm(m.get('220_sku') or m.get('shopify_sku')); ean=_norm(m.get('220_ean') or m.get('shopify_barcode'))
         if vid: master_by_vid[vid].append((i,m))
@@ -53,7 +85,7 @@ def run():
         if ean: master_by_ean[ean].append((i,m))
     shop_skus=Counter(_norm(v['shopify_sku']) for v in variants if _norm(v['shopify_sku']))
     shop_eans=Counter(_norm(v['shopify_barcode']) for v in variants if _norm(v['shopify_barcode']))
-    rec=[]; ready=[]; exc=[]; matched_master_rows=set(); counts=Counter()
+    rec=[]; prelim=[]; ready=[]; exc=[]; matched_master_rows=set(); counts=Counter()
     for v in variants:
         vid=v['shopify_variant_id']; sku=v['shopify_sku']; ean=v['shopify_barcode']; reasons=[]; candidates=[]
         if vid and master_by_vid.get(vid): candidates=master_by_vid[vid]; match_basis='VARIANT_ID'
@@ -83,7 +115,7 @@ def run():
         if not v['shopify_title']: candidate_blockers.append('MISSING_TITLE')
         if v['description_present']!='YES': candidate_blockers.append('MISSING_DESCRIPTION')
         if not v['featured_image_url']: candidate_blockers.append('MISSING_FEATURED_IMAGE')
-        if not candidate_blockers: ready.append(row)
+        if not candidate_blockers: prelim.append(row)
         else: exc.append({**row,'candidate_blockers':'|'.join(dict.fromkeys(candidate_blockers))})
     for i,m in enumerate(master,2):
         if i in matched_master_rows: continue
@@ -91,11 +123,15 @@ def run():
         exc.append({'shopify_product_id':_norm(m.get('shopify_product_id')),'shopify_variant_id':vid,'shopify_sku':sku,'shopify_barcode':ean,'shopify_title':_norm(m.get('shopify_title')),'variant_title':_norm(m.get('variant_title')),'vendor':_norm(m.get('vendor')),'product_type':_norm(m.get('product_type')),'shopify_status':_norm(m.get('shopify_status')),'shopify_category_id':'','shopify_category_name':'','description_present':'','featured_image_url':'','featured_image_width':'','featured_image_height':'','selected_options_json':'','reconciliation_status':'MISSING_IN_SHOPIFY','match_basis':'','master_row':i,'reasons':'','candidate_blockers':'MISSING_IN_SHOPIFY'})
         counts['MISSING_IN_SHOPIFY']+=1
     rec_fields=list(rec[0]) if rec else ['shopify_variant_id','shopify_sku','shopify_barcode','reconciliation_status']
-    exc_fields=list(exc[0]) if exc else rec_fields+['candidate_blockers']
-    summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(ready),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
+    ready_fields=list(ready[0]) if ready else rec_fields+['identity_status','identity_basis','phh_lookup_http']
+    exc_fields=[]
+    for x in exc:
+        for k in x:
+            if k not in exc_fields: exc_fields.append(k)
+    summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'create_candidates_after_identity':len(ready),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
     return {
         'full-catalog-summary.json':_json(summary),
         'full-catalog-reconciliation.csv':_csv(rec,rec_fields),
-        'full-catalog-ready-candidates.csv':_csv(ready,rec_fields),
+        'full-catalog-ready-candidates.csv':_csv(ready,ready_fields),
         'full-catalog-exceptions.csv':_csv(exc,exc_fields)
     },summary
