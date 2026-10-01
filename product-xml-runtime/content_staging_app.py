@@ -125,6 +125,14 @@ def _persisted_v6_artifact(name,mime):
     except Exception as e:
         return _json({'error':'v6 category rule audit artifact unavailable','detail':f'{type(e).__name__}: {e}'},503)
 
+@app.get('/phh-gearaid-68150-preflight.json')
+def phh_gearaid_68150_preflight():
+    try:
+        from phh_gearaid_68150_preflight_v42 import preflight
+        return _json(preflight())
+    except Exception as e:
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {e}','marketplace_writes':0},500)
+
 @app.get('/phh-gearaid-36134-preflight.json')
 def phh_gearaid_36134_preflight():
     try:
