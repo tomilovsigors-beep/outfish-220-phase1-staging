@@ -47,6 +47,8 @@ MANUFACTURER={
 }
 
 PACKAGE={'package_length':0.62,'package_width':0.36,'package_height':0.07,'package_weight':None}
+SHOPIFY_STOCK_LIVE=2
+PHH_STOCK_TARGET=0 if SHOPIFY_STOCK_LIVE<=0 else max(SHOPIFY_STOCK_LIVE,3)
 
 def preflight():
     errors=[]
@@ -77,6 +79,9 @@ def preflight():
       'image_count':len(IMAGES),
       'required_features':PRODUCT_FEATURES,
       'package':PACKAGE,
+      'shopify_stock_live':SHOPIFY_STOCK_LIVE,
+      'phh_stock_target':PHH_STOCK_TARGET,
+      'stock_rule':'0->0; positive stock has PHH minimum floor 3',
       'manufacturer':MANUFACTURER,
       'errors':errors,
       'safety':{'product_creates':0,'stock_changes':0,'price_changes':0,'shopify_writes':0,'master_writes':0},
