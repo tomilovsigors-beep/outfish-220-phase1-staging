@@ -125,6 +125,14 @@ def _persisted_v6_artifact(name,mime):
     except Exception as e:
         return _json({'error':'v6 category rule audit artifact unavailable','detail':f'{type(e).__name__}: {e}'},503)
 
+@app.get('/phh-existing-shape-v44.json')
+def phh_existing_shape_v44():
+    try:
+        from phh_existing_product_shape_probe_v44 import run
+        return _json(run())
+    except Exception as e:
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {e}','writes':0},500)
+
 @app.get('/phh-compliance-ops-v43.json')
 def phh_compliance_ops_v43():
     try:
