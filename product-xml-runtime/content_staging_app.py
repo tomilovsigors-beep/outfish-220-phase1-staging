@@ -405,6 +405,15 @@ def _maybe_run_naturehike_gale_probe():
         print('NATUREHIKE_GALE_PROBE_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 
+def _maybe_run_gearaid_68150_create():
+    if os.getenv('RUN_GEARAID_68150_CREATE','').strip()!='APPROVED_ONCE': return
+    try:
+        from phh_gearaid_68150_create_v46 import run
+        run()
+    except Exception as e:
+        print('PHH_GEARAID_68150_CREATE_V46_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
+
+
 def _maybe_run_naturehike_gale_create():
     if os.getenv('RUN_NATUREHIKE_GALE_CREATE','').strip()!='APPROVED_ONCE': return
     try:
@@ -755,6 +764,7 @@ def _boot():
     _maybe_run_naturehike_gale_offer_v16()
     _maybe_run_phh_offer_contract_v16()
     _maybe_run_naturehike_gale_patch()
+    _maybe_run_gearaid_68150_create()
     _maybe_run_naturehike_gale_create()
     _maybe_run_naturehike_gale_probe()
     _maybe_run_pmp_discovery()
