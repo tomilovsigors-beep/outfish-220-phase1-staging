@@ -161,15 +161,15 @@ def run():
         for k in x:
             if k not in exc_fields: exc_fields.append(k)
     # Read-only PHH taxonomy probe for the first Product XML pilot.
-    pilot_category_probe={'sku':'80673','ean':'0021563806731','status':'NOT_RUN','candidates':[]}
+    pilot_category_probe={'sku':'36134-010','ean':'0021563361346','status':'NOT_RUN','candidates':[]}
     try:
         import current_product_category_audit as _cat
-        _ts,_cats,_attrs=_cat._latest_taxonomy(db)
+        _ts,_cats,_attrs=_cat._latest_taxonomy(os.getenv('DATABASE_URL',''))
         _required=defaultdict(list)
         for _a in _attrs:
             if str(_a.get('required')).casefold() in {'true','1','yes'}:
                 _required[str(_a.get('category_id'))].append({k:_a.get(k,'') for k in ('field_id','title_en','title_lv','title_ru','required')})
-        _terms=('paracord','utility cord','utility cords','rope','cord')
+        _terms=('fabric refresher','fabric freshener','odor eliminator','odour eliminator','odor remover','odour remover','textile care','clothing care','smaku','kvap','tekstil','audum')
         _hits=[]
         for _x in _cats:
             if str(_x.get('allow_add_products')).casefold() not in {'true','1','yes'}: continue
@@ -178,10 +178,10 @@ def run():
             if not _matched: continue
             _cid=str(_x.get('category_id'))
             _hits.append({'category_id':_cid,'parent_id':str(_x.get('parent_id') or ''),'title_en':_x.get('title_en',''),'title_lv':_x.get('title_lv',''),'title_ru':_x.get('title_ru',''),'matched_terms':_matched,'required_fields':_required.get(_cid,[])})
-        pilot_category_probe={'sku':'80673','ean':'0021563806731','status':'PASS','query_terms':list(_terms),'candidate_count':len(_hits),'candidates':_hits[:30]}
+        pilot_category_probe={'sku':'36134-010','ean':'0021563361346','status':'PASS','query_terms':list(_terms),'candidate_count':len(_hits),'candidates':_hits[:30]}
     except Exception as _e:
-        pilot_category_probe={'sku':'80673','ean':'0021563806731','status':'ERROR','error':f'{type(_e).__name__}: {_e}','candidates':[]}
-    summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_80673_category_probe':pilot_category_probe,'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
+        pilot_category_probe={'sku':'36134-010','ean':'0021563361346','status':'ERROR','error':f'{type(_e).__name__}: {_e}','candidates':[]}
+    summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_36134_category_probe':pilot_category_probe,'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
     return {
         'full-catalog-summary.json':_json(summary),
         'full-catalog-reconciliation.csv':_csv(rec,rec_fields),
