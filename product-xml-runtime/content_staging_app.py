@@ -17,7 +17,7 @@ try:
     for _a in _attrs:
         if str(_a.get('required')).casefold() in {'true','1','yes'}:
             _req.setdefault(str(_a.get('category_id')),[]).append({k:_a.get(k,'') for k in ('field_id','title_en','title_lv','title_ru','required')})
-    _terms=('fabric refresher','fabric freshener','odor eliminator','odour eliminator','odor remover','odour remover','textile care','clothing care','smaku','kvap','tekstil','audum')
+    _terms=('laundry','washing','clothing care','clothes care','fabric care','garment care','skalb','drabuž','audinių prieži','veļas','apģērbu kop','audumu kop','стирк','уход за одежд','уход за ткан','средства для одежды')
     _hits=[]
     for _x in _cats:
         if str(_x.get('allow_add_products')).casefold() not in {'true','1','yes'}: continue
