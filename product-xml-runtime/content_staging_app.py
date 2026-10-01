@@ -8,6 +8,27 @@ from master_bulk_write import run_controlled_master_write, EXPECTED_DATASET_HASH
 from full_catalog_audit import run as run_full_catalog_audit
 
 app=Flask(__name__); LOCK=threading.RLock(); FULL_CATALOG_LOCK=threading.RLock(); FULL_CATALOG={'status':'not_run','error':None,'summary':{},'artifacts':{}}; STATE={'status':'starting','error':None,'last_refresh':None,'summary':{},'artifacts':{},'product_xml_validation':{},'persistence_ok':False,'persistence_error':None,'recovered_from_postgres':False,'master_write':None}
+
+# Early read-only taxonomy probe for the single-product pilot. Runs before the heavy catalog audit.
+try:
+    import current_product_category_audit as _pilot_cat
+    _ts,_cats,_attrs=_pilot_cat._latest_taxonomy(os.getenv('DATABASE_URL',''))
+    _req={}
+    for _a in _attrs:
+        if str(_a.get('required')).casefold() in {'true','1','yes'}:
+            _req.setdefault(str(_a.get('category_id')),[]).append({k:_a.get(k,'') for k in ('field_id','title_en','title_lv','title_ru','required')})
+    _terms=('fabric refresher','fabric freshener','odor eliminator','odour eliminator','odor remover','odour remover','textile care','clothing care','smaku','kvap','tekstil','audum')
+    _hits=[]
+    for _x in _cats:
+        if str(_x.get('allow_add_products')).casefold() not in {'true','1','yes'}: continue
+        _txt=' '.join(str(_x.get(k,'') or '') for k in ('title_en','title_lv','title_lt','title_ee','title_fi','title_ru')).casefold()
+        _matched=[t for t in _terms if t in _txt]
+        if not _matched: continue
+        _cid=str(_x.get('category_id'))
+        _hits.append({'category_id':_cid,'parent_id':str(_x.get('parent_id') or ''),'title_en':_x.get('title_en',''),'title_lv':_x.get('title_lv',''),'title_lt':_x.get('title_lt',''),'title_ru':_x.get('title_ru',''),'matched_terms':_matched,'required_fields':_req.get(_cid,[])})
+    print('PILOT_36134_EARLY_CATEGORY_PROBE '+json.dumps({'sku':'36134-010','ean':'0021563361346','candidate_count':len(_hits),'candidates':_hits[:50]},ensure_ascii=False,sort_keys=True),flush=True)
+except Exception as _pilot_e:
+    print('PILOT_36134_EARLY_CATEGORY_PROBE_FAILED',type(_pilot_e).__name__,str(_pilot_e),flush=True)
 def _json(o,status=200): return Response(json.dumps(o,indent=2,sort_keys=True),status=status,mimetype='application/json')
 def refresh():
     try:
