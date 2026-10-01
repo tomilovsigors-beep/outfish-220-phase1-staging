@@ -17,7 +17,7 @@ try:
     for _a in _attrs:
         if str(_a.get('required')).casefold() in {'true','1','yes'}:
             _req.setdefault(str(_a.get('category_id')),[]).append({k:_a.get(k,'') for k in ('field_id','title_en','title_lt','title_lv','title_ee','title_fi','title_ru','required')})
-    _terms=('laundry','washing','clothing care','clothes care','fabric care','garment care','skalb','drabuž','audinių prieži','veļas','apģērbu kop','audumu kop','стирк','уход за одежд','уход за ткан','средства для одежды')
+    _terms=('towel','microfiber towel','microfibre towel','travel towel','camping towel','rankšluost','dviel','rätik','pyyhe','полотенц')
     _hits=[]
     for _x in _cats:
         if str(_x.get('allow_add_products')).casefold() not in {'true','1','yes'}: continue
@@ -26,9 +26,9 @@ try:
         if not _matched: continue
         _cid=str(_x.get('category_id'))
         _hits.append({'category_id':_cid,'parent_id':str(_x.get('parent_id') or ''),'title_en':_x.get('title_en',''),'title_lv':_x.get('title_lv',''),'title_lt':_x.get('title_lt',''),'title_ru':_x.get('title_ru',''),'matched_terms':_matched,'required_fields':_req.get(_cid,[])})
-    print('PILOT_36134_EARLY_CATEGORY_PROBE '+json.dumps({'sku':'36134-010','ean':'0021563361346','candidate_count':len(_hits),'candidates':_hits[:50]},ensure_ascii=False,sort_keys=True),flush=True)
+    print('PILOT_68150_EARLY_CATEGORY_PROBE '+json.dumps({'sku':'68150','ean':'0021563681505','candidate_count':len(_hits),'candidates':_hits[:50]},ensure_ascii=False,sort_keys=True),flush=True)
 except Exception as _pilot_e:
-    print('PILOT_36134_EARLY_CATEGORY_PROBE_FAILED',type(_pilot_e).__name__,str(_pilot_e),flush=True)
+    print('PILOT_68150_EARLY_CATEGORY_PROBE_FAILED',type(_pilot_e).__name__,str(_pilot_e),flush=True)
 def _json(o,status=200): return Response(json.dumps(o,indent=2,sort_keys=True),status=status,mimetype='application/json')
 def refresh():
     try:
