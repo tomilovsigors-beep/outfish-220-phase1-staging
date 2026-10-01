@@ -8,7 +8,9 @@ from urllib.parse import urljoin
 
 import requests
 
-BASE = "https://pmpapi.pigugroup.eu"\n_API_TOKEN_CACHE = None\n_API_TOKEN_CACHE_SOURCE = None
+BASE = "https://pmpapi.pigugroup.eu"
+_API_TOKEN_CACHE = None
+_API_TOKEN_CACHE_SOURCE = None
 
 
 def _docs_creds():
