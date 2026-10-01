@@ -46,7 +46,7 @@ MANUFACTURER={
  'representative_address':'Kirchplatz 5, 29664 Walsrode, Germany',
 }
 
-PACKAGE={'package_length':0.62,'package_width':0.36,'package_height':0.07,'package_weight':0.30}
+PACKAGE={'package_length':0.62,'package_width':0.36,'package_height':0.07,'package_weight':None}
 
 def preflight():
     errors=[]
@@ -60,7 +60,8 @@ def preflight():
     if len(PRODUCT_FEATURES) != 5: errors.append('FEATURE_COUNT')
     if not CN8 or len(CN8) != 8: errors.append('CN8')
     if not ORIGIN_COUNTRY: errors.append('ORIGIN_COUNTRY')
-    if min(PACKAGE.values()) <= 0: errors.append('PACKAGE')
+    if min(PACKAGE[k] for k in ('package_length','package_width','package_height')) <= 0: errors.append('PACKAGE_DIMENSIONS')
+    if not PACKAGE.get('package_weight') or PACKAGE.get('package_weight') <= 0: errors.append('PACKAGE_WEIGHT_MISSING_INTERNAL')
     if not all(MANUFACTURER.values()): errors.append('MANUFACTURER_OR_REPRESENTATIVE')
     return {
       'status':'PASS' if not errors else 'BLOCKED',
