@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 
 import requests
 
-BASE = "https://pmpapi.pigugroup.eu"
+BASE = "https://pmpapi.pigugroup.eu"\n_API_TOKEN_CACHE = None\n_API_TOKEN_CACHE_SOURCE = None
 
 
 def _docs_creds():
@@ -33,11 +33,36 @@ def _api_get(path, token, timeout=25):
     return requests.get(urljoin(BASE, path), timeout=timeout, headers={"User-Agent": "outfish-phh-readonly-discovery/8.1", "Accept": "application/json", "Authorization": "Pigu-mp " + token})
 
 
-def _api_login(version="v3", timeout=25):
+def _token_response(token, source="cache"):
+    r=requests.Response()
+    r.status_code=200
+    r._content=json.dumps({"token":token,"source":source}).encode("utf-8")
+    r.headers["content-type"]="application/json"
+    return r
+
+def _api_login(version="v3", timeout=25, allow_network_login=True):
+    global _API_TOKEN_CACHE,_API_TOKEN_CACHE_SOURCE
+    env_token=os.getenv("PMP_API_TOKEN","").strip()
+    if env_token:
+        _API_TOKEN_CACHE=env_token; _API_TOKEN_CACHE_SOURCE="env"
+        return _token_response(env_token,"env")
+    if _API_TOKEN_CACHE:
+        return _token_response(_API_TOKEN_CACHE,_API_TOKEN_CACHE_SOURCE or "memory")
+    if not allow_network_login:
+        return None
     u, p = _api_creds()
     if not u or not p:
         return None
-    return requests.post(urljoin(BASE, f"/{version}/login"), json={"username": u, "password": p}, timeout=timeout, headers={"User-Agent": "outfish-phh-readonly-discovery/8.1", "Accept": "application/json"})
+    r=requests.post(urljoin(BASE, f"/{version}/login"), json={"username": u, "password": p}, timeout=timeout, headers={"User-Agent": "outfish-phh-auth/46", "Accept": "application/json"})
+    if r.ok:
+        try:
+            body=r.json()
+            token=body.get("token") if isinstance(body,dict) else None
+            if token:
+                _API_TOKEN_CACHE=token; _API_TOKEN_CACHE_SOURCE="network"
+        except Exception:
+            pass
+    return r
 
 
 def _embedded_spec(text):
@@ -126,10 +151,10 @@ def discover():
     schema_words = ("categor", "field", "attribute", "propert", "parameter", "value", "dictionary")
     semantic_schemas = {k: v for k, v in schemas.items() if any(w in k.lower() for w in schema_words)}
 
-    login_info = {"attempted": False, "reason": "PMP_API_USERNAME/PMP_API_PASSWORD not configured"}
+    login_info = {"attempted": False, "reason": "No cached or PMP_API_TOKEN token available; discovery does not perform network login"}
     token = None
     try:
-        lr = _api_login("v3")
+        lr = _api_login("v3", allow_network_login=False)
         if lr is not None:
             login_info = {"attempted": True, "status": lr.status_code, "content_type": lr.headers.get("content-type"), "bytes": len(lr.content)}
             if lr.ok:
