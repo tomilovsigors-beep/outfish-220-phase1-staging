@@ -46,7 +46,7 @@ MANUFACTURER={
  'representative_address':'Kirchplatz 5, 29664 Walsrode, Germany',
 }
 
-PACKAGE={'package_length':0.20,'package_width':0.10,'package_height':0.10,'package_weight':0.30}
+PACKAGE={'package_length':0.62,'package_width':0.36,'package_height':0.07,'package_weight':0.30}
 
 def preflight():
     errors=[]
