@@ -16,7 +16,8 @@ FEATURES=[
  {'name':'Komplektacija','value':'1'},
  {'name':'Rankšluosčių tipas','value':'Sportinis'},
 ]
-PAYLOAD={'product_features':FEATURES,
+from phh_gearaid_68150_preflight_v42 import IMAGES
+PAYLOAD={'category_id':3377,'images':IMAGES,'product_features':FEATURES,
          'modifications':[{'sku':SKU,'manufacturer_code':SKU,'tare_deposit_quantity':0}]}
 
 def _all_scalars(x):
@@ -40,6 +41,10 @@ def run():
     md=me.json(); seller=str(md.get('id') or (md.get('seller') or {}).get('id') or '')
     if seller!=SELLER_ID:
         return {'status':'BLOCKED_SELLER_MISMATCH','seller_id':seller,'writes':0}
+    if sorted(x['name'] for x in FEATURES)!=sorted(['Medžiaga','Spalva','Išmatavimai','Komplektacija','Rankšluosčių tipas']):
+        return {'status':'BLOCKED_FEATURE_KEYS','writes':0}
+    if set(PAYLOAD)!= {'category_id','images','product_features','modifications'} or PAYLOAD['category_id']!=3377 or len(IMAGES)!=3:
+        return {'status':'BLOCKED_PATCH_SCOPE','writes':0}
     # PHH's documented API has no GET /v3/products/{productId}. Use successful
     # immutable prior import execution for identity instead of unsupported 404 route.
     identity=_api_get(f'/v3/sellers/{seller}/product/import/execution/58291763/results?limit=20&offset=0',token)
@@ -66,7 +71,7 @@ def run():
     out={'status':'SUBMITTED' if rr.status_code==200 else 'VALIDATION_ERROR',
          'product_id':PRODUCT_ID,'sku':SKU,'ean':EAN,'execution_id':execution_id,
          'http_status':rr.status_code,'response':response,
-         'features':FEATURES,'changes_only':'product_features',
+         'features':FEATURES,'changes_only':'features with required identity/category/image fields repeated unchanged',
          'safety':{'product_creates':0,'stock_writes':0,'price_writes':0,'Shopify_writes':0,'Master_writes':0}}
     if rr.status_code==200:
         for _ in range(12):
