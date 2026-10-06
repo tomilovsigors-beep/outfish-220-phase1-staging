@@ -72,7 +72,7 @@ def run():
         return {'status':'BLOCKED_CATEGORY_METADATA_MALFORMED','writes':0}
     for feature in FEATURES:
         matching_attributes=[a for a in attributes if feature['name'] in
-            [str(v) for v in (a.get('name'),a.get('title'),a.get('name_lt')) if v is not None]]
+            [str(v) for v in (a.get('title_lt'),a.get('name'),a.get('title'),a.get('name_lt')) if v is not None]]
         if len(matching_attributes)!=1:
             return {'status':'BLOCKED_FEATURE_FIELD_NOT_VERIFIED',
                     'field':feature['name'],'writes':0}
