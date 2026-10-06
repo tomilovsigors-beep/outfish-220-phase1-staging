@@ -81,6 +81,7 @@ def run():
         row={**v,'reconciliation_status':status,'match_basis':match_basis,'master_row':candidates[0][0] if len(candidates)==1 else '','reasons':'|'.join(reasons)}
         rec.append(row)
         candidate_blockers=list(reasons)
+        if _norm(v.get('vendor')).casefold()=='fhm': candidate_blockers.append('EXCLUDED_FHM')
         # NEW is a valid Product XML discovery state: PHH existence decides CREATE vs SKIP.\n        # Only ambiguous/duplicate reconciliation is unsafe and must stop before PHH identity gating.\n        if status not in ('MATCHED','NEW'): candidate_blockers.append('RECONCILIATION_'+status)
         if v['shopify_status']!='ACTIVE': candidate_blockers.append('SHOPIFY_NOT_ACTIVE')
         if not v['shopify_title']: candidate_blockers.append('MISSING_TITLE')
@@ -88,8 +89,7 @@ def run():
         if not v['featured_image_url']: candidate_blockers.append('MISSING_FEATURED_IMAGE')
         if not candidate_blockers: prelim.append(row)
         else: exc.append({**row,'candidate_blockers':'|'.join(dict.fromkeys(candidate_blockers))})
-    # Identity/existence gate MUST run before category/attributes and before FHM GTIN handling.
-    # Existing 220 cards are never CREATE candidates. New FHM is parked until Latvian GTINs are supplied.
+    # FHM is excluded before any PHH identity lookup. Existing 220 cards are never CREATE candidates.
     lr=_api_login('v3'); lr.raise_for_status(); phh_token=lr.json()['token']
     offers=scan_offers(phh_token)
     by_ean=defaultdict(list); by_sku=defaultdict(list)
@@ -135,7 +135,8 @@ def run():
                 exc.append({**row,'identity_status':'IDENTITY_DEFERRED','identity_basis':'PILOT_LIMIT','phh_lookup_http':'','candidate_blockers':'IDENTITY_DEFERRED'})
                 continue
             q=barcode_lookup[ean]; lookup_http=q.get('http','')
-            if q.get('http') not in (200,404):
+            # HTTP 404 on one endpoint does not prove absence in the PHH catalogue.
+            if q.get('http') != 200:
                 identity_counts['IDENTITY_EXCEPTION']+=1
                 exc.append({**row,'identity_status':'IDENTITY_EXCEPTION','identity_basis':'BARCODE_LOOKUP','phh_lookup_http':lookup_http,'candidate_blockers':'IDENTITY_EXCEPTION'})
                 continue
@@ -143,9 +144,6 @@ def run():
         if exists:
             identity_counts['SKIP_EXISTING_220']+=1
             exc.append({**row,'identity_status':'SKIP_EXISTING_220','identity_basis':identity_basis,'phh_lookup_http':lookup_http,'candidate_blockers':'SKIP_EXISTING_220'})
-        elif _norm(row.get('vendor')).casefold()=='fhm':
-            identity_counts['FHM_GTIN_PENDING']+=1
-            exc.append({**row,'identity_status':'FHM_GTIN_PENDING','identity_basis':identity_basis or 'NOT_FOUND_220','phh_lookup_http':lookup_http,'candidate_blockers':'FHM_GTIN_PENDING'})
         else:
             identity_counts['CREATE_CANDIDATE']+=1
             ready.append({**row,'identity_status':'CREATE_CANDIDATE','identity_basis':identity_basis or 'NOT_FOUND_220','phh_lookup_http':lookup_http})
@@ -181,7 +179,7 @@ def run():
         pilot_category_probe={'sku':'36134-010','ean':'0021563361346','status':'PASS','query_terms':list(_terms),'candidate_count':len(_hits),'candidates':_hits[:30]}
     except Exception as _e:
         pilot_category_probe={'sku':'36134-010','ean':'0021563361346','status':'ERROR','error':f'{type(_e).__name__}: {_e}','candidates':[]}
-    summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_36134_category_probe':pilot_category_probe,'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
+    summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_36134_category_probe':pilot_category_probe,'excluded_fhm':sum('EXCLUDED_FHM' in x.get('candidate_blockers','') for x in exc),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
     return {
         'full-catalog-summary.json':_json(summary),
         'full-catalog-reconciliation.csv':_csv(rec,rec_fields),
