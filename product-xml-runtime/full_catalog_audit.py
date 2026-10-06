@@ -105,7 +105,7 @@ def run():
     identity_counts=Counter()
     # Pilot mode: prioritize clean NEW non-FHM rows and bound slow PHH barcode checks.
     # Unchecked rows are explicitly deferred, never assumed absent from 220.
-    pilot_lookup_limit=max(1,int(os.getenv('FULL_CATALOG_IDENTITY_LOOKUP_LIMIT','200')))
+    pilot_lookup_limit=max(0,int(os.getenv('FULL_CATALOG_IDENTITY_LOOKUP_LIMIT','0')))
     lookup_priority=sorted(
         (row for row in prelim
          if _norm(row.get('shopify_barcode'))
@@ -118,7 +118,7 @@ def run():
         )
     )
     lookup_eans=[]; seen_lookup_eans=set()
-    for row in (lookup_priority if phh_token else []):
+    for row in (lookup_priority if phh_token and pilot_lookup_limit > 0 else []):
         ean=_norm(row.get('shopify_barcode'))
         if ean in seen_lookup_eans: continue
         seen_lookup_eans.add(ean); lookup_eans.append(ean)
@@ -151,8 +151,12 @@ def run():
             identity_counts['SKIP_EXISTING_220']+=1
             exc.append({**row,'identity_status':'SKIP_EXISTING_220','identity_basis':identity_basis,'phh_lookup_http':lookup_http,'candidate_blockers':'SKIP_EXISTING_220'})
         else:
-            identity_counts['CREATE_CANDIDATE']+=1
-            ready.append({**row,'identity_status':'CREATE_CANDIDATE','identity_basis':identity_basis or 'NOT_FOUND_220','phh_lookup_http':lookup_http})
+            # A negative barcode query alone cannot exhaustively prove absence.
+            identity_counts['IDENTITY_UNRESOLVED']+=1
+            exc.append({**row,'identity_status':'IDENTITY_UNRESOLVED',
+                        'identity_basis':identity_basis or 'NO_POSITIVE_MATCH',
+                        'phh_lookup_http':lookup_http,
+                        'candidate_blockers':'PHH_ABSENCE_NOT_EXHAUSTIVELY_VERIFIED'})
     for i,m in enumerate(master,2):
         if i in matched_master_rows: continue
         sku=_norm(m.get('220_sku') or m.get('shopify_sku')); ean=_norm(m.get('220_ean') or m.get('shopify_barcode')); vid=_norm(m.get('shopify_variant_id'))
@@ -194,11 +198,24 @@ def run():
         vid=_norm(v.get('shopify_variant_id'))
         matching=master_by_vid.get(vid,[])
         m=matching[0][1] if len(matching)==1 else {}
-        found=bool(by_ean.get(barcode) or by_sku.get(sku))
+        # Positive seller offer identity must agree on BOTH SKU and barcode;
+        # one-sided matches are collisions requiring review, never CREATE.
+        possible_offers={id(x):x for x in (by_ean.get(barcode,[]) if barcode else []) +
+                         (by_sku.get(sku,[]) if sku else [])}
+        consistent=[]
+        for offer in possible_offers.values():
+            eans=_offer_eans(offer)
+            skus=_offer_skus(offer)
+            matched_ean=barcode in eans or (len(barcode)==12 and "0"+barcode in eans) or (
+                len(barcode)==13 and barcode.startswith("0") and barcode[1:] in eans)
+            if matched_ean and sku in skus:
+                consistent.append(offer)
         known_68150=(sku=='68150' and barcode in ('0021563681505','021563681505'))
-        if found or known_68150:
+        if consistent or known_68150:
             phh_identity={'status':'EXISTING','identity_verified':True}
             if known_68150: phh_identity['product_id']='270344850'
+        elif possible_offers:
+            phh_identity={'status':'CONFLICT','identity_verified':False}
         else:
             phh_identity={'status':'UNKNOWN'}
         locs={}
@@ -229,7 +246,7 @@ def run():
         })
     pipeline_report=pipeline_audit(pipeline_inputs)
     pipeline_rows=pipeline_report.pop('rows')
-    summary={'status':'PASS' if not phh_access_error else 'DEGRADED_PHH_UNAVAILABLE','phh_access_error':phh_access_error,'read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_36134_category_probe':pilot_category_probe,'excluded_fhm':sum('EXCLUDED_FHM' in x.get('candidate_blockers','') for x in exc),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
+    summary={'status':'PASS' if not phh_access_error else 'DEGRADED_PHH_UNAVAILABLE','phh_access_error':phh_access_error,'read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'identity_negative_evidence_policy':'FAIL_CLOSED','top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_36134_category_probe':pilot_category_probe,'excluded_fhm':sum('EXCLUDED_FHM' in x.get('candidate_blockers','') for x in exc),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
     summary['publication_pipeline']=pipeline_report
     return {
         'full-catalog-summary.json':_json(summary),
