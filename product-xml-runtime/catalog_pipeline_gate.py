@@ -116,7 +116,21 @@ def audit(items):
             x["state"] = "BLOCKED"
             x["reasons"] = sorted(set(x["reasons"] + ["DUPLICATE_IDENTITY_IN_BATCH"]))
     counts = Counter(x["state"] for x in results)
+    reasons = Counter(reason for x in results for reason in x["reasons"])
+    # Separate marketplace identity uncertainty from data preparation:
+    # an unresolved PHH identity is never a CREATE authorization.
+    content_reasons = ("CATEGORY_", "ATTRIBUTE_", "REQUIRED_ATTRIBUTE_",
+                       "LOCALE_", "IMAGE_", "MAIN_", "PACKAGE_", "MANUFACTURER_",
+                       "CONTENT_")
+    blocked_identity = sum("PHH_IDENTITY_UNRESOLVED" in x["reasons"]
+                           for x in results if x["state"]=="BLOCKED")
+    content_complete_independently = sum(
+        not any(r.startswith(content_reasons) for r in x["reasons"])
+        for x in results if x["state"] not in ("EXCLUDED","EXISTING","VERIFIED"))
     digest = sha256(json.dumps(results, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
     return {"checked": len(results), "counts": {s: counts[s] for s in STATES},
             "ready_to_submit": counts["READY"], "dataset_hash": digest, "rows": results,
+            "blocker_breakdown":dict(sorted(reasons.items(),key=lambda kv:(-kv[1],kv[0]))),
+            "blocked_identity_unresolved":blocked_identity,
+            "content_gates_complete_excluding_identity":content_complete_independently,
             "phh_writes": 0}
