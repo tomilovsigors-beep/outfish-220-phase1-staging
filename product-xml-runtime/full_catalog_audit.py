@@ -189,6 +189,11 @@ def run():
         pilot_category_probe={'sku':'36134-010','ean':'0021563361346','status':'PASS','query_terms':list(_terms),'candidate_count':len(_hits),'candidates':_hits[:30]}
     except Exception as _e:
         pilot_category_probe={'sku':'36134-010','ean':'0021563361346','status':'ERROR','error':f'{type(_e).__name__}: {_e}','candidates':[]}
+    # Safe identity resolver: do not infer locale evidence from fuzzy matches.
+    from master_variant_identity import master_variant_index, resolve_variant, selftest as master_identity_selftest
+    master_identity_selftest()
+    master_identity_index=master_variant_index(master)
+    master_identity_counts=Counter()
     # Single catalog-wide state reducer. Evidence is fail-closed: no published
     # counts are inferred from HTTP 404, unverified categories or Master snapshots.
     from catalog_pipeline_gate import audit as pipeline_audit
@@ -228,8 +233,9 @@ def run():
     for v in variants:
         sku=_norm(v.get('shopify_sku')); barcode=_norm(v.get('shopify_barcode'))
         vid=_norm(v.get('shopify_variant_id'))
-        matching=master_by_vid.get(vid,[])
-        m=matching[0][1] if len(matching)==1 else {}
+        m,master_basis=resolve_variant(v,master_identity_index)
+        master_identity_counts[master_basis]+=1
+        m=m or {}
         identity=(sku,_ean13(barcode))
         mapped=category_by_identity.get(identity)
         evidence_status=(_norm(mapped.get('status')) if mapped else 'UNMAPPED')
@@ -325,15 +331,18 @@ def run():
             price_profile['BELOW_10_EUR' if price<10 else 'AT_LEAST_10_EUR']+=1
         except (TypeError,ValueError):
             price_profile['UNKNOWN']+=1
-        vid=_norm(v.get('shopify_variant_id'))
-        matching=master_by_vid.get(vid,[])
-        master=matching[0][1] if len(matching)==1 else {}
+        master,basis=resolve_variant(v,master_identity_index)
+        master=master or {}
         for loc in ('lt','lv','ee','ru','fi'):
             if (_norm(master.get('220_title_'+loc)) and
                     _norm(master.get('220_description_'+loc+'_html')) and
                     _norm(master.get('220_supplier_code_'+loc))==_norm(v.get('shopify_sku'))):
                 locale_profile['MASTER_PRESENT_'+loc.upper()]+=1
-        if len(matching)==1: locale_profile['EXACT_MASTER_VARIANT_LINK']+=1
+        if basis in ('EXACT_VARIANT_ID','EXACT_SKU_GTIN'):
+            locale_profile['SAFE_MASTER_IDENTITY_LINK']+=1
+    summary['master_identity_resolution']={'counts':dict(master_identity_counts),
+        'exact_links':master_identity_counts['EXACT_VARIANT_ID']+master_identity_counts['EXACT_SKU_GTIN'],
+        'writes':0,'basis':'exact_shopify_variant_id_or_unique_sku_gtin'}
     summary['source_quality']={'barcode_non_fhm':dict(barcode_profile),
               'live_price_non_fhm':dict(price_profile),
               'locale_coverage_non_fhm':dict(locale_profile)}
