@@ -192,12 +192,62 @@ def run():
     # Single catalog-wide state reducer. Evidence is fail-closed: no published
     # counts are inferred from HTTP 404, unverified categories or Master snapshots.
     from catalog_pipeline_gate import audit as pipeline_audit
+    # Reuse the pre-existing audited v4 category mappings, matched by exact
+    # variant SKU + checked EAN. V10 predominantly concerns excluded FHM:
+    # no broad propagation of category IDs by similar product names.
+    from catalog_pipeline_gate import _ean13
+    category_by_identity={}
+    attribute_by_identity={}
+    category_artifact_status='UNAVAILABLE'
+    try:
+        from current_product_category_audit_v4 import load_latest_artifact as load_v4
+        payload=load_v4(os.getenv('DATABASE_URL'),'current-product-category-mapping.csv')
+        if payload:
+            category_artifact_status='LOADED'
+            for oldrow in csv.DictReader(io.StringIO(payload.decode('utf-8-sig'))):
+                key=(_norm(oldrow.get('220_sku')),_ean13(oldrow.get('220_ean')))
+                if not key[0] or not key[1]: continue
+                if key in category_by_identity:
+                    category_by_identity[key]=None # Ambiguous: never accept either
+                else: category_by_identity[key]=oldrow
+    except Exception as e:
+        category_artifact_status='ERROR_'+type(e).__name__
+    try:
+        from current_product_attribute_audit_v11 import load_latest_artifact as load_v11
+        payload=load_v11(os.getenv('DATABASE_URL'),'v11-product-attribute-readiness.csv')
+        if payload:
+            for ar in csv.DictReader(io.StringIO(payload.decode('utf-8-sig'))):
+                key=(_norm(ar.get('220_sku')),_ean13(ar.get('220_ean')))
+                if key[0] and key[1] and key not in attribute_by_identity: attribute_by_identity[key]=ar
+    except Exception:
+        pass
+    category_evidence_counts=Counter()
+    attribute_evidence_counts=Counter()
+    category_backlog=defaultdict(lambda:Counter())
     pipeline_inputs=[]
     for v in variants:
         sku=_norm(v.get('shopify_sku')); barcode=_norm(v.get('shopify_barcode'))
         vid=_norm(v.get('shopify_variant_id'))
         matching=master_by_vid.get(vid,[])
         m=matching[0][1] if len(matching)==1 else {}
+        identity=(sku,_ean13(barcode))
+        mapped=category_by_identity.get(identity)
+        evidence_status=(_norm(mapped.get('status')) if mapped else 'UNMAPPED')
+        cid=(_norm(mapped.get('selected_category_id')) if mapped else '')
+        is_fhm=_norm(v.get('vendor')).casefold()=='fhm'
+        if not is_fhm:
+            key=(_norm(v.get('shopify_category_id')),_norm(v.get('shopify_category_name')))
+            category_backlog[key]['variants']+=1
+            if evidence_status in ('AUTO','BLOCKED_ATTRIBUTES') and cid:
+                category_backlog[key]['mapped_v4']+=1
+                category_evidence_counts['V4_ACCEPTED_CATEGORY']+=1
+            else:
+                category_evidence_counts['CATEGORY_NOT_VERIFIED']+=1
+            old_attr=attribute_by_identity.get(identity)
+            if old_attr:
+                attribute_evidence_counts[_norm(old_attr.get('attribute_readiness')) or 'UNKNOWN']+=1
+        else:
+            category_evidence_counts['FHM_IGNORED']+=1
         # Positive seller offer identity must agree on BOTH SKU and barcode;
         # one-sided matches are collisions requiring review, never CREATE.
         possible_offers={id(x):x for x in (by_ean.get(barcode,[]) if barcode else []) +
@@ -237,7 +287,9 @@ def run():
             'shopify_active':v.get('shopify_status')=='ACTIVE',
             'price_eur':v.get('shopify_price_live'),
             'phh_identity':phh_identity,
-            'category_id':'','category_confirmed':False,
+            'category_id':cid if not is_fhm and evidence_status in ('AUTO','BLOCKED_ATTRIBUTES') else '',
+            # v4 gives category evidence, not authority to send a new PHH product.
+            'category_confirmed':False,
             'required_attributes_complete':False,
             'locales':locs,'images':images,
             'main_image_neutral_verified':_norm(m.get('220_image_rule_status'))=='PASS',
@@ -247,11 +299,25 @@ def run():
     pipeline_report=pipeline_audit(pipeline_inputs)
     pipeline_rows=pipeline_report.pop('rows')
     summary={'status':'PASS' if not phh_access_error else 'DEGRADED_PHH_UNAVAILABLE','phh_access_error':phh_access_error,'read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'identity_negative_evidence_policy':'FAIL_CLOSED','top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_36134_category_probe':pilot_category_probe,'excluded_fhm':sum('EXCLUDED_FHM' in x.get('candidate_blockers','') for x in exc),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
+    summary['category_evidence']={
+        'source':'cached_v4_exact_sku_ean_only',
+        'artifact_status':category_artifact_status,
+        'non_fhm_status_counts':dict(category_evidence_counts),
+        'existing_v11_attribute_status_counts':dict(attribute_evidence_counts),
+        'category_groups_non_fhm':len(category_backlog),
+        'values_dictionary_confirmed_for_import':False,
+        'category_assignments_authorize_create':False}
+    backlog_rows=[{'shopify_category_id':cat[0],'shopify_category_name':cat[1],
+                   'variants':c['variants'],'mapped_v4':c['mapped_v4'],
+                   'unmapped_or_review':c['variants']-c['mapped_v4']}
+                  for cat,c in category_backlog.items()]
+    backlog_rows.sort(key=lambda r:(-r['unmapped_or_review'],-r['variants'],r['shopify_category_name']))
     summary['publication_pipeline']=pipeline_report
     return {
         'full-catalog-summary.json':_json(summary),
         'full-catalog-reconciliation.csv':_csv(rec,rec_fields),
         'catalog-pipeline-state.json':_json({'summary':pipeline_report,'rows':pipeline_rows}),
+        'catalog-category-backlog.csv':_csv(backlog_rows,['shopify_category_id','shopify_category_name','variants','mapped_v4','unmapped_or_review']),
         'full-catalog-ready-candidates.csv':_csv(ready,ready_fields),
         'full-catalog-exceptions.csv':_csv(exc,exc_fields)
     },summary
