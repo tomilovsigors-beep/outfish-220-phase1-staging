@@ -1,6 +1,8 @@
 # Gear Aid Seam Grip +WP Field Repair Kit — SKU 10592
 **Status: PREPARED, NOT PUBLISHED (identity/category/photo/packaging gates pending).**
 
+**2026-10-06 identity update:** Seller confirms product is not in 220.lv. Read-only PHH scan found no matching SKU/EAN among 1,988 offers; general barcode endpoint returned 404 (not decisive for whole catalog). **Critical content discrepancy:** Shopify copy mentions THREE patches (2 clear + 1 black), while Gear Aid manufacturer's official product page and other suppliers list TWO patches (1 clear + 1 black), with manufacturer page showing SKU 10591 versus Shopify 10592. Exact version must be established from product packaging/photos before publishing. DO NOT import the draft's patch quantities as verified; no guessed values. Manufacturer source: https://www.gearaid.com/products/seam-grip-sealant-waterproof-repair-kit . Shopify inventory item weight read-only is 0 kg, which is not a valid package mass. Category 4391 required fields include aerosol product capacity, which is not applicable to this non-aerosol repair kit; category suitability must be resolved. This is not ready to CREATE.
+
 ## Exact identity and Shopify facts (checked 2026-10-06)
 - Brand: Gear Aid (not FHM)
 - Shopify: gid://shopify/Product/10859838177618
