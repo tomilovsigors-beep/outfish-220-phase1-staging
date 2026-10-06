@@ -760,7 +760,9 @@ def _maybe_run_phh_card_identity_probe_v33():
         print('PHH_CARD_IDENTITY_PROBE_V33_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 def _boot():
-    _maybe_run_gearaid_68150_feature_patch()
+    # Legacy one-shot probes include PHH writes. Never execute them as a side effect
+    # of staging deploy; explicit operations must use a separately authorized runner.
+    print('OUTFISH_SAFE_BOOT_LEGACY_JOBS_DISABLED',flush=True)
     try:
         arts,summary=run_full_catalog_audit()
         with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='ok',error=None,summary=summary,artifacts=arts)
@@ -768,46 +770,7 @@ def _boot():
     except Exception as e:
         with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='error',error=f'{type(e).__name__}: {e}')
         print('FULL_CATALOG_AUDIT_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
-    _maybe_run_phh_offer_import_status_probe()
-    _maybe_run_phh_offer_import_endpoint_probe()
-    _maybe_run_phh_import_schema_probe()
-    _maybe_run_phh_import_contract_probe()
-    _maybe_run_phh_stock_publish_v40()
-    _maybe_run_phh_offer_write_contract_probe()
-    _maybe_run_phh_stock_publish_plan_v39()
-    _maybe_run_phh_stock_diff_v38()
-    _maybe_run_phh_stock_feed_readiness_v37()
-    _maybe_run_phh_residual_semantic_audit_v34()
-    _maybe_run_phh_hard_conflict_registry_v35()
-    _maybe_run_phh_identity_automation_gate_v36()
-    _maybe_run_phh_card_identity_probe_v33()
-    _maybe_run_phh_identity_migration_audit_v32()
-    _maybe_run_phh_offer_identity_export_v31()
-    _maybe_run_phh_master_audit_v30()
-    _maybe_run_phh_barcode_check_test_v29()
-    _maybe_run_phh_barcode_check_schema_v28()
-    _maybe_run_phh_audit_ops_v27()
-    _maybe_run_phh_existence_check_v26()
-    _maybe_run_phh_image_paths_v24()
-    _maybe_run_phh_feature_value_ops_v23()
-    _maybe_run_pmp_import_history_mining_v11k()
-    _maybe_run_9050_contract_bundle()
-    _maybe_run_phh_gale_autocheck_now_v22()
-    _maybe_run_phh_field_capabilities_v21()
-    _maybe_run_naturehike_gale_full_patch_v20()
-    _maybe_run_phh_product_import_schema_v19()
-    _maybe_run_phh_gale_autocheck_v18()
-    _maybe_run_phh_gale_mod_status_v17()
-    _maybe_run_naturehike_gale_offer_v16()
-    _maybe_run_phh_offer_contract_v16()
-    _maybe_run_naturehike_gale_patch()
-    _maybe_run_gearaid_68150_create()
-    _maybe_run_naturehike_gale_create()
-    _maybe_run_naturehike_gale_probe()
-    _maybe_run_pmp_discovery()
-    _maybe_run_current_product_category_audit()
-    _maybe_run_family_category_audit_v5()
-    _maybe_run_category_rule_audit_v6()
+    # Deliberately disabled: old RUN_* environment flags can outlive approvals.
     print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in ('GOOGLE_SERVICE_ACCOUNT_JSON','SHOPIFY_CLIENT_ID','SHOPIFY_CLIENT_SECRET','DATABASE_URL')},sort_keys=True),flush=True)
     restored=_restore_latest()
     if restored:
@@ -820,8 +783,8 @@ def _boot():
                 print('PRODUCT_XML_READINESS_REFRESH',json.dumps({'publish_gate':v.get('publish_gate'),'ready':v.get('ready_count',v.get('ready')),'blocked':v.get('blocked_count',v.get('blocked')),'dataset_hash':s.get('dataset_hash'),'projected_product_xml_ready':s.get('projected_product_xml_ready')},sort_keys=True),flush=True)
             except Exception as e:
                 print('PRODUCT_XML_READINESS_REFRESH_FAILED',type(e).__name__,str(e),flush=True)
-        _maybe_run_master_write(); return
+        return
     try:
-        refresh(); _maybe_run_master_write()
+        refresh()
     except Exception: pass
 threading.Thread(target=_boot,daemon=True).start()
