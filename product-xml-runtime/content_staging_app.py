@@ -302,6 +302,8 @@ def _full_catalog_artifact(name,mime):
     if not b: return _json({'error':'full catalog audit artifact unavailable','status':status,'detail':err},503)
     return Response(b,status=200,mimetype=mime,headers={'Cache-Control':'no-store'})
 
+@app.get('/full-catalog/pipeline-state.json')
+def full_catalog_pipeline_state(): return _full_catalog_artifact('catalog-pipeline-state.json','application/json')
 @app.get('/full-catalog/summary.json')
 def full_catalog_summary(): return _full_catalog_artifact('full-catalog-summary.json','application/json')
 @app.get('/full-catalog/reconciliation.csv')
