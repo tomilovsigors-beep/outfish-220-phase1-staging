@@ -55,6 +55,48 @@ def run():
     if len(matching)!=1:
         return {'status':'BLOCKED_IDENTITY_NOT_PROVEN','writes':0,'matching_records':len(matching)}
 
+    # Fail-closed: do not send category-dropdown guesses as if they were approved.
+    # PHH category metadata is authoritative for exact field names; values must
+    # additionally be present in its exposed allowed-value dictionary. No new
+    # import execution is created when these are unverified.
+    category_resp=_api_get('/v3/categories?id=3377&limit=10&offset=0',token)
+    if not category_resp.ok:
+        return {'status':'BLOCKED_CATEGORY_METADATA_UNREADABLE',
+                'http_status':category_resp.status_code,'writes':0}
+    try:
+        category_body=category_resp.json()
+        categories=(category_body.get('category_list') or [])
+        category=next(x for x in categories if str(x.get('category_id'))=='3377')
+        attributes=category.get('attributes') or []
+    except Exception:
+        return {'status':'BLOCKED_CATEGORY_METADATA_MALFORMED','writes':0}
+    for feature in FEATURES:
+        matching_attributes=[a for a in attributes if feature['name'] in
+            [str(v) for v in (a.get('name'),a.get('title'),a.get('name_lt')) if v is not None]]
+        if len(matching_attributes)!=1:
+            return {'status':'BLOCKED_FEATURE_FIELD_NOT_VERIFIED',
+                    'field':feature['name'],'writes':0}
+        attribute=matching_attributes[0]
+        dictionary=None
+        for dictionary_key in ('allowed_values','possible_values','values','options'):
+            vals=attribute.get(dictionary_key)
+            if isinstance(vals,list):
+                dictionary=vals
+                break
+        if not dictionary:
+            return {'status':'BLOCKED_FEATURE_DROPDOWN_UNVERIFIED',
+                    'field':feature['name'],'writes':0}
+        accepted=set()
+        for option in dictionary:
+            if isinstance(option,str): accepted.add(option.strip())
+            elif isinstance(option,dict):
+                for value_key in ('name','value','title','name_lt','label'):
+                    value=option.get(value_key)
+                    if isinstance(value,str): accepted.add(value.strip())
+        if feature['value'] not in accepted:
+            return {'status':'BLOCKED_FEATURE_VALUE_NOT_IN_DICTIONARY',
+                    'field':feature['name'],'value':feature['value'],'writes':0}
+
     er=requests.post(urljoin(BASE,f'/v3/sellers/{seller}/product/import/execution'),
         headers={'Authorization':'Pigu-mp '+token,'Accept':'application/json','Content-Type':'application/json'},timeout=30)
     if er.status_code!=201:
