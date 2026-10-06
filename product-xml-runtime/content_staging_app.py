@@ -821,6 +821,24 @@ def _maybe_run_phh_card_identity_probe_v33():
 def _boot():
     # Restore snapshots before expensive network calls. Keep the web server responsive.
     print('OUTFISH_SAFE_BOOT_LEGACY_JOBS_DISABLED',flush=True)
+    # Verify invariant gates once per worker before any full-catalog processing.
+    try:
+        import unittest
+        suite=unittest.defaultTestLoader.loadTestsFromName('test_catalog_pipeline_gate')
+        test_result=unittest.TestResult()
+        suite.run(test_result)
+        tests_ok=test_result.wasSuccessful() and test_result.testsRun>=9
+        print('OUTFISH_CATALOG_GATE_SELFTEST',json.dumps({
+              'passed':tests_ok,'tests':test_result.testsRun,
+              'failures':len(test_result.failures),'errors':len(test_result.errors)
+              },sort_keys=True),flush=True)
+        if not tests_ok:
+            with FULL_CATALOG_LOCK:
+                FULL_CATALOG.update(status='error',error='CATALOG_GATE_SELFTEST_FAILED')
+            return
+    except Exception as e:
+        print('OUTFISH_CATALOG_GATE_SELFTEST_ERROR',type(e).__name__,flush=True)
+        return
     restored=_restore_full_catalog()
     _restore_latest()
     print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in
