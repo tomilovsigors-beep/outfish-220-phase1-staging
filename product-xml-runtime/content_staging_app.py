@@ -311,6 +311,14 @@ def full_catalog_ready_candidates(): return _full_catalog_artifact('full-catalog
 @app.get('/full-catalog/exceptions.csv')
 def full_catalog_exceptions(): return _full_catalog_artifact('full-catalog-exceptions.csv','text/csv')
 
+@app.get('/phh-gearaid-68150-feature-probe-v47.json')
+def phh_gearaid_68150_feature_probe_v47():
+    try:
+        from phh_gearaid_68150_feature_patch_v47 import probe
+        return _json(probe())
+    except Exception as e:
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {e}','writes':0},503)
+
 @app.get('/phh-feature-value-ops-v23.json')
 def phh_feature_value_ops_v23():
     try:
