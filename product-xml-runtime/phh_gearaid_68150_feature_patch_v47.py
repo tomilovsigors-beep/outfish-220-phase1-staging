@@ -77,3 +77,31 @@ def run():
                 break
     print('GEARAID_68150_FEATURE_PATCH_RESULT '+json.dumps(out,ensure_ascii=False,sort_keys=True),flush=True)
     return out
+
+def probe():
+    lr=_api_login('v3')
+    if lr is None or not lr.ok:
+        return {'status':'AUTH_FAILED','http_status':None if lr is None else lr.status_code,'writes':0}
+    token=lr.json().get('token')
+    product=_api_get(f'/v3/products/{PRODUCT_ID}',token)
+    category=_api_get('/v3/categories?id=3377&limit=10&offset=0',token)
+    def body(r):
+        try: return r.json()
+        except Exception: return {'raw':r.text[:500]}
+    p=body(product)
+    cat=body(category)
+    # Limit response strictly to existing product identity/feature fields and 3377 category attribute metadata.
+    obj=(p.get('product') or p) if isinstance(p,dict) else {}
+    items=cat.get('category_list') or [] if isinstance(cat,dict) else []
+    chosen=[v for v in items if str(v.get('category_id'))=='3377']
+    attrs=(chosen[0].get('attributes') or []) if chosen else []
+    return {
+       'status':'PASS' if product.ok and category.ok else 'READ_ERROR',
+       'product_http_status':product.status_code,
+       'category_http_status':category.status_code,
+       'product_id':PRODUCT_ID,
+       'product_fields':{k:obj.get(k) for k in ('id','product_id','category_id','title','modifications','product_features','features','status') if k in obj},
+       'product_top_level_keys':list(p.keys()) if isinstance(p,dict) else [],
+       'category_3377_attributes':attrs,
+       'writes':0,
+    }
