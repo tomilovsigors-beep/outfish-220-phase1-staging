@@ -14,6 +14,7 @@ FEATURES=[
  {'name':'Spalva','value':'Mėlyna'},
  {'name':'Išmatavimai','value':'51 x 102 cm'},
  {'name':'Komplektacija','value':'1'},
+ {'name':'Rankšluosčių tipas','value':'Sportinis'},
 ]
 PAYLOAD={'product_features':FEATURES,
          'modifications':[{'sku':SKU,'manufacturer_code':SKU,'tare_deposit_quantity':0}]}
@@ -39,13 +40,16 @@ def run():
     md=me.json(); seller=str(md.get('id') or (md.get('seller') or {}).get('id') or '')
     if seller!=SELLER_ID:
         return {'status':'BLOCKED_SELLER_MISMATCH','seller_id':seller,'writes':0}
-    p=_api_get(f'/v3/products/{PRODUCT_ID}',token)
-    if p.status_code!=200:
-        return {'status':'BLOCKED_PRODUCT_NOT_READABLE','http_status':p.status_code,'writes':0}
-    obj=p.json()
-    scalars=set(_all_scalars(obj))
-    if not ({SKU,EAN} & scalars):
-        return {'status':'BLOCKED_PRODUCT_IDENTITY_MISMATCH','product_id':PRODUCT_ID,'writes':0}
+    # PHH's documented API has no GET /v3/products/{productId}. Use successful
+    # immutable prior import execution for identity instead of unsupported 404 route.
+    identity=_api_get(f'/v3/sellers/{seller}/product/import/execution/58291763/results?limit=20&offset=0',token)
+    if identity.status_code!=200:
+        return {'status':'BLOCKED_IDENTITY_HISTORY_UNREADABLE','http_status':identity.status_code,'writes':0}
+    rows=(identity.json().get('items') or [])
+    matching=[x for x in rows if x.get('status')=='success' and str(x.get('sku'))==SKU and EAN in str(x.get('message') or '')]
+    if len(matching)!=1:
+        return {'status':'BLOCKED_IDENTITY_NOT_PROVEN','writes':0,'matching_records':len(matching)}
+
     er=requests.post(urljoin(BASE,f'/v3/sellers/{seller}/product/import/execution'),
         headers={'Authorization':'Pigu-mp '+token,'Accept':'application/json','Content-Type':'application/json'},timeout=30)
     if er.status_code!=201:
