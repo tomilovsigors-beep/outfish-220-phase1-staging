@@ -827,4 +827,19 @@ def _boot():
     if os.getenv('RUN_FULL_CATALOG_AUDIT','1').strip()=='1':
         threading.Thread(target=_run_and_persist_catalog,daemon=True).start()
     print('OUTFISH_STAGING_READONLY_READY',json.dumps({'catalog_cache_restored':restored}),flush=True)
-threading.Thread(target=_boot,daemon=True).start()
+# Gunicorn forks workers after importing this module. A thread started at import
+# time runs in the parent and its in-memory results are invisible to workers.
+# Initialize once per worker on the first request, instead.
+_WORKER_BOOT_PID=None
+_WORKER_BOOT_LOCK=threading.Lock()
+
+@app.before_request
+def _worker_boot_once():
+    global _WORKER_BOOT_PID
+    pid=os.getpid()
+    if _WORKER_BOOT_PID==pid: return
+    with _WORKER_BOOT_LOCK:
+        if _WORKER_BOOT_PID==pid: return
+        _WORKER_BOOT_PID=pid
+        threading.Thread(target=_boot,daemon=True,name='outfish-readonly-worker-boot').start()
+
