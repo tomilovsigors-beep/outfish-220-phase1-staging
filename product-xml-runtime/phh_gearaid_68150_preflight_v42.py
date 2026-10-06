@@ -24,9 +24,9 @@ DESCRIPTIONS={
 }
 
 IMAGES=[
- 'https://cdn.shopify.com/s/files/1/0771/7188/4370/files/Untitleddesign-2026-01-26T122610.754.jpg?v=1769423223',
- 'https://cdn.shopify.com/s/files/1/0771/7188/4370/files/Untitleddesign-2026-01-26T134940.876.jpg?v=1769428223',
- 'https://cdn.shopify.com/s/files/1/0771/7188/4370/files/atri-zustoss-mikroskiedras-dvielis-2.png?v=1769428223',
+ 'https://cdn.shopify.com/s/files/1/0771/7188/4370/files/Untitleddesign-2026-01-26T122610.754.jpg',
+ 'https://cdn.shopify.com/s/files/1/0771/7188/4370/files/Untitleddesign-2026-01-26T134940.876.jpg',
+ 'https://cdn.shopify.com/s/files/1/0771/7188/4370/files/atri-zustoss-mikroskiedras-dvielis-2.png',
 ]
 
 PRODUCT_FEATURES=[
@@ -54,6 +54,7 @@ def preflight():
     errors=[]
     if CATEGORY_ID != 3377: errors.append('CATEGORY')
     if len(IMAGES) < 2: errors.append('IMAGES_LT_2')
+    if any(not image.lower().endswith(('.jpg','.jpeg','.png')) for image in IMAGES): errors.append('PHH_IMAGE_URL_EXTENSION')
     if set(TITLES) != {'lt','lv','ee','ru','fi'} or not all(TITLES.values()): errors.append('TITLE_LOCALES')
     if set(DESCRIPTIONS) != {'lt','lv','ee','ru','fi'} or not all(DESCRIPTIONS.values()): errors.append('DESCRIPTION_LOCALES')
     for _lang,_html in DESCRIPTIONS.items():
