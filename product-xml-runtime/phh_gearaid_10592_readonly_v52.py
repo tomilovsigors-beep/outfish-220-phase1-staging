@@ -40,11 +40,18 @@ def run():
         if seller!=SELLER:
             out.update(status='BLOCKED_WRONG_SELLER',seller=seller);return out
         barcode=_api_get(f'/v3/products/product-modifications/barcodes?ean={EAN}',token,timeout=14)
-        if not barcode.ok:
+        if barcode.status_code==404:
+            # An HTTP 404 on the barcode route is NOT evidence of absence.
+            # Continue read-only cross-checks but retain UNKNOWN until exhaustive
+            # seller/product identity evidence becomes available.
+            out['barcode_lookup_status']='HTTP_404_UNVERIFIED'
+            barcode_data=[]
+        elif not barcode.ok:
             out.update(status='BLOCKED_BARCODE_LOOKUP',http_status=barcode.status_code);return out
-        barcode_data=barcode.json()
-        if not isinstance(barcode_data,(list,dict)):
-            out['status']='BLOCKED_BARCODE_RESPONSE_SHAPE';return out
+        else:
+            barcode_data=barcode.json()
+            if not isinstance(barcode_data,(list,dict)):
+                out['status']='BLOCKED_BARCODE_RESPONSE_SHAPE';return out
         out['barcode_match_count']=len(barcode_data) if isinstance(barcode_data,list) else None
         out['barcode_matches']=[{'id':row.get('id'),'category_id':((row.get('modification') or {}).get('category') or {}).get('id'),'app_name':(row.get('modification') or {}).get('app_name')} for row in barcode_data if isinstance(row,dict)][:8] if isinstance(barcode_data,list) else []
         if barcode_data:
@@ -81,8 +88,8 @@ def run():
                 'allowed_values_available':bool(f.get('allowed_values') or f.get('values') or f.get('options'))}
                 for f in fields if f.get('required')]
         out['category_confirmed']=True
-        out['duplicate_state']='NOT_FOUND_IN_CHECKED_ENDPOINTS'
-        out['status']='CANDIDATE_NEEDS_DICTIONARY_AND_PACKAGE_VERIFICATION'
+        out['duplicate_state']='UNKNOWN' if barcode.status_code==404 else 'NOT_FOUND_IN_CHECKED_ENDPOINTS'
+        out['status']='BLOCKED_BARCODE_404_UNVERIFIED' if barcode.status_code==404 else 'CANDIDATE_NEEDS_DICTIONARY_AND_PACKAGE_VERIFICATION'
         return out
     except Exception as e:
         out.update(status='BLOCKED_QUERY_ERROR',error_type=type(e).__name__)
