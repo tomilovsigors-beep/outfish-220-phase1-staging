@@ -90,6 +90,16 @@ def probe():
         except Exception: return {'raw':r.text[:500]}
     p=body(product)
     cat=body(category)
+    barcode=_api_get(f'/v3/products/product-modifications/barcodes?ean={EAN}',token)
+    barcode_body=body(barcode)
+    from pmp_api_probe import _docs_get,_embedded_spec
+    docs=_docs_get('/docs')
+    spec=_embedded_spec(docs.text) if docs.ok else None
+    operations=[]
+    for path,verbs in ((spec or {}).get('paths') or {}).items():
+        if any(w in path.lower() for w in ('product','feature','attribute')):
+            operations.append({'path':path,'verbs':[m.upper() for m in ('get','patch','post','put') if m in verbs]})
+
     # Limit response strictly to existing product identity/feature fields and 3377 category attribute metadata.
     obj=(p.get('product') or p) if isinstance(p,dict) else {}
     items=cat.get('category_list') or [] if isinstance(cat,dict) else []
@@ -103,5 +113,8 @@ def probe():
        'product_fields':{k:obj.get(k) for k in ('id','product_id','category_id','title','modifications','product_features','features','status') if k in obj},
        'product_top_level_keys':list(p.keys()) if isinstance(p,dict) else [],
        'category_3377_attributes':attrs,
+       'barcode_lookup_http_status':barcode.status_code,
+       'barcode_lookup_body':barcode_body,
+       'product_related_operations':operations,
        'writes':0,
     }
