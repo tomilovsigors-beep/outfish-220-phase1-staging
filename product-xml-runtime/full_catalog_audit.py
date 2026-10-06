@@ -18,7 +18,7 @@ def _json(o): return json.dumps(o,sort_keys=True,indent=2,ensure_ascii=False).en
 def _shopify_all_variants():
     token=_shopify_token(); shop=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
     url=f'https://{shop}/admin/api/{API_VERSION}/graphql.json'
-    query='''query FullCatalog($after:String){productVariants(first:250,after:$after,sortKey:ID){pageInfo{hasNextPage endCursor} nodes{id sku barcode title selectedOptions{name value} product{id title description vendor productType status category{id fullName} featuredMedia{... on MediaImage{image{url width height}}}}}}}'''
+    query='''query FullCatalog($after:String){productVariants(first:250,after:$after,sortKey:ID){pageInfo{hasNextPage endCursor} nodes{id sku barcode price inventoryQuantity title selectedOptions{name value} product{id title description vendor productType status category{id fullName} featuredMedia{... on MediaImage{image{url width height}}}}}}}'''
     rows=[]; after=None; pages=0
     while True:
         r=requests.post(url,headers={'X-Shopify-Access-Token':token,'Content-Type':'application/json'},json={'query':query,'variables':{'after':after}},timeout=90)
@@ -29,7 +29,7 @@ def _shopify_all_variants():
             product=v.get('product') or {}; cat=product.get('category') or {}; fm=product.get('featuredMedia') or {}; image=fm.get('image') or {}
             rows.append({
                 'shopify_product_id':_norm(product.get('id')),'shopify_variant_id':_norm(v.get('id')),
-                'shopify_sku':_norm(v.get('sku')),'shopify_barcode':_norm(v.get('barcode')),
+                'shopify_sku':_norm(v.get('sku')),'shopify_barcode':_norm(v.get('barcode')),'shopify_price_live':_norm(v.get('price')),'shopify_stock_live':v.get('inventoryQuantity'),
                 'shopify_title':_norm(product.get('title')),'variant_title':_norm(v.get('title')),
                 'vendor':_norm(product.get('vendor')),'product_type':_norm(product.get('productType')),
                 'shopify_status':_norm(product.get('status')),'shopify_category_id':_norm(cat.get('id')),
@@ -179,10 +179,56 @@ def run():
         pilot_category_probe={'sku':'36134-010','ean':'0021563361346','status':'PASS','query_terms':list(_terms),'candidate_count':len(_hits),'candidates':_hits[:30]}
     except Exception as _e:
         pilot_category_probe={'sku':'36134-010','ean':'0021563361346','status':'ERROR','error':f'{type(_e).__name__}: {_e}','candidates':[]}
+    # Single catalog-wide state reducer. Evidence is fail-closed: no published
+    # counts are inferred from HTTP 404, unverified categories or Master snapshots.
+    from catalog_pipeline_gate import audit as pipeline_audit
+    pipeline_inputs=[]
+    for v in variants:
+        sku=_norm(v.get('shopify_sku')); barcode=_norm(v.get('shopify_barcode'))
+        vid=_norm(v.get('shopify_variant_id'))
+        matching=master_by_vid.get(vid,[])
+        m=matching[0][1] if len(matching)==1 else {}
+        found=bool(by_ean.get(barcode) or by_sku.get(sku))
+        known_68150=(sku=='68150' and barcode in ('0021563681505','021563681505'))
+        if found or known_68150:
+            phh_identity={'status':'EXISTING','identity_verified':True}
+            if known_68150: phh_identity['product_id']='270344850'
+        else:
+            phh_identity={'status':'UNKNOWN'}
+        locs={}
+        for loc in ('lt','lv','ee','ru','fi'):
+            locs[loc]={
+                'title':m.get('220_title_'+loc),
+                'description_html':m.get('220_description_'+loc+'_html'),
+                'supplier_code':m.get('220_supplier_code_'+loc)
+            }
+        images=[]
+        image_url=_norm(m.get('220_main_image_url') or v.get('featured_image_url'))
+        if image_url:
+            images.append({'url':image_url,'width':int(v.get('featured_image_width') or 0),
+                           'height':int(v.get('featured_image_height') or 0)})
+        pipeline_inputs.append({
+            'sku':sku,'barcode':barcode,'vendor':v.get('vendor'),
+            'sku_unique':bool(sku and shop_skus[sku]==1),
+            'ean_unique':bool(barcode and shop_eans[barcode]==1),
+            'shopify_active':v.get('shopify_status')=='ACTIVE',
+            'price_eur':v.get('shopify_price_live'),
+            'phh_identity':phh_identity,
+            'category_id':'','category_confirmed':False,
+            'required_attributes_complete':False,
+            'locales':locs,'images':images,
+            'main_image_neutral_verified':_norm(m.get('220_image_rule_status'))=='PASS',
+            'package_verified':False,'manufacturer_verified':False,
+            'content_approved':_norm(m.get('220_content_ready_status'))=='APPROVED'
+        })
+    pipeline_report=pipeline_audit(pipeline_inputs)
+    pipeline_rows=pipeline_report.pop('rows')
     summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_36134_category_probe':pilot_category_probe,'excluded_fhm':sum('EXCLUDED_FHM' in x.get('candidate_blockers','') for x in exc),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
+    summary['publication_pipeline']=pipeline_report
     return {
         'full-catalog-summary.json':_json(summary),
         'full-catalog-reconciliation.csv':_csv(rec,rec_fields),
+        'catalog-pipeline-state.json':_json({'summary':pipeline_report,'rows':pipeline_rows}),
         'full-catalog-ready-candidates.csv':_csv(ready,ready_fields),
         'full-catalog-exceptions.csv':_csv(exc,exc_fields)
     },summary
