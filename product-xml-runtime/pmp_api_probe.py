@@ -42,6 +42,62 @@ def _token_response(token, source="cache"):
     r.headers["content-type"]="application/json"
     return r
 
+# PHH access tokens are documented as valid for 30 days.
+# Keep a 29-day authenticated token across deploys. This cache is private to the
+# service's DATABASE_URL; never print or expose token values in diagnostics.
+def _db_auth_state():
+    db=os.getenv("DATABASE_URL","").strip()
+    if not db: return None
+    try:
+        import psycopg
+        with psycopg.connect(db,connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""create table if not exists phh_service_auth_cache (
+                    cache_key text primary key,
+                    token text,
+                    token_expires_at timestamptz,
+                    retry_after timestamptz
+                )""")
+                cur.execute("""select token,
+                    coalesce(token_expires_at > now(),false),
+                    coalesce(retry_after > now(),false)
+                    from phh_service_auth_cache where cache_key='pmp_v3'""")
+                row=cur.fetchone()
+        return {'token':row[0] if row and row[1] else None,
+                'cooldown':bool(row[2]) if row else False}
+    except Exception:
+        return None
+
+
+def _db_auth_write(token=None,cooldown=False):
+    db=os.getenv("DATABASE_URL","").strip()
+    if not db: return
+    try:
+        import psycopg
+        with psycopg.connect(db,connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""create table if not exists phh_service_auth_cache (
+                    cache_key text primary key,
+                    token text,
+                    token_expires_at timestamptz,
+                    retry_after timestamptz
+                )""")
+                if token:
+                    cur.execute("""insert into phh_service_auth_cache
+                        (cache_key,token,token_expires_at,retry_after)
+                        values('pmp_v3',%s,now()+interval '29 days',NULL)
+                        on conflict(cache_key) do update set
+                        token=excluded.token,token_expires_at=excluded.token_expires_at,
+                        retry_after=NULL""",(token,))
+                elif cooldown:
+                    cur.execute("""insert into phh_service_auth_cache
+                        (cache_key,retry_after) values('pmp_v3',now()+interval '60 minutes')
+                        on conflict(cache_key) do update set
+                        retry_after=excluded.retry_after""")
+    except Exception:
+        pass
+
+
 def _api_login(version="v3", timeout=25, allow_network_login=True):
     global _API_TOKEN_CACHE,_API_TOKEN_CACHE_SOURCE
     env_token=os.getenv("PMP_API_TOKEN","").strip()
@@ -50,20 +106,28 @@ def _api_login(version="v3", timeout=25, allow_network_login=True):
         return _token_response(env_token,"env")
     if _API_TOKEN_CACHE:
         return _token_response(_API_TOKEN_CACHE,_API_TOKEN_CACHE_SOURCE or "memory")
-    if not allow_network_login:
+    state=_db_auth_state()
+    if state and state.get('token'):
+        _API_TOKEN_CACHE=state['token']; _API_TOKEN_CACHE_SOURCE="database"
+        return _token_response(_API_TOKEN_CACHE,"database")
+    if not allow_network_login or (state and state.get('cooldown')):
         return None
-    u, p = _api_creds()
-    if not u or not p:
-        return None
-    r=requests.post(urljoin(BASE, f"/{version}/login"), json={"username": u, "password": p}, timeout=timeout, headers={"User-Agent": "outfish-phh-auth/46", "Accept": "application/json"})
+    u,p=_api_creds()
+    if not u or not p: return None
+    r=requests.post(urljoin(BASE,f"/{version}/login"),
+        json={"username":u,"password":p},timeout=timeout,
+        headers={"User-Agent":"outfish-phh-auth/48","Accept":"application/json"})
     if r.ok:
         try:
             body=r.json()
             token=body.get("token") if isinstance(body,dict) else None
             if token:
                 _API_TOKEN_CACHE=token; _API_TOKEN_CACHE_SOURCE="network"
+                _db_auth_write(token=token)
         except Exception:
             pass
+    elif r.status_code==429:
+        _db_auth_write(cooldown=True)
     return r
 
 
