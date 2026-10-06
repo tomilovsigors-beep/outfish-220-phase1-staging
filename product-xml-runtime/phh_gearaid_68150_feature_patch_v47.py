@@ -94,6 +94,8 @@ def probe():
         except Exception: return {'raw':r.text[:500]}
     p=body(product)
     cat=body(category)
+    history=_api_get('/v3/sellers/9990696/product/import/execution/58291763/results?limit=20&offset=0',token)
+    history_body=body(history)
     barcode=_api_get(f'/v3/products/product-modifications/barcodes?ean={EAN}',token)
     barcode_body=body(barcode)
     from pmp_api_probe import _docs_get,_embedded_spec
@@ -117,6 +119,8 @@ def probe():
        'product_fields':{k:obj.get(k) for k in ('id','product_id','category_id','title','modifications','product_features','features','status') if k in obj},
        'product_top_level_keys':list(p.keys()) if isinstance(p,dict) else [],
        'category_3377_attributes':attrs,
+       'prior_successful_execution_http_status':history.status_code,
+       'prior_successful_execution_items':history_body.get('items',[]) if isinstance(history_body,dict) else [],
        'barcode_lookup_http_status':barcode.status_code,
        'barcode_lookup_body':barcode_body,
        'product_related_operations':operations,
