@@ -258,44 +258,99 @@ def v11_product_attribute_readiness(): return _persisted_v11_artifact('v11-produ
 @app.get('/v11/v11-product-required-attributes.csv')
 def v11_product_required_attributes(): return _persisted_v11_artifact('v11-product-required-attributes.csv','text/csv')
 
-@app.route('/full-catalog/refresh',methods=['GET','POST'])
+@app.get('/full-catalog/refresh')
+def full_catalog_refresh_status():
+    with FULL_CATALOG_LOCK:
+        return _json({'status':FULL_CATALOG['status'],
+                      'summary':FULL_CATALOG.get('summary') or {},
+                      'error':FULL_CATALOG.get('error'),
+                      'persistence_ok':FULL_CATALOG.get('persistence_ok')})
+
+@app.post('/full-catalog/refresh')
 def full_catalog_refresh():
+    # Only a read-only audit; all legacy PHH/Master/Shopify write handlers stay off.
+    with FULL_CATALOG_LOCK:
+        if FULL_CATALOG.get('status')=='running':
+            return _json({'status':'ALREADY_RUNNING'},202)
+    threading.Thread(target=_run_and_persist_catalog,daemon=True).start()
+    return _json({'status':'STARTED_READ_ONLY','phh_writes':0},202)
+
+
+def _persist_full_catalog(arts, summary):
+    db=os.getenv('DATABASE_URL','').strip()
+    if not db: return False,'DATABASE_URL_MISSING'
+    try:
+        import base64, gzip, psycopg
+        payload={name:base64.b64encode(gzip.compress(data,compresslevel=6)).decode('ascii')
+                 for name,data in arts.items()}
+        with psycopg.connect(db,connect_timeout=10) as con:
+            with con.cursor() as cur:
+                cur.execute("""create table if not exists outfish_full_catalog_snapshots(
+                    id bigint generated always as identity primary key,
+                    created_at timestamptz not null default now(),
+                    dataset_hash text not null,
+                    summary jsonb not null, artifacts jsonb not null)""")
+                h=(summary.get('publication_pipeline') or {}).get('dataset_hash','')
+                cur.execute("""insert into outfish_full_catalog_snapshots(dataset_hash,summary,artifacts)
+                               values(%s,%s::jsonb,%s::jsonb)""",
+                            (h,json.dumps(summary),json.dumps(payload)))
+                cur.execute("""delete from outfish_full_catalog_snapshots where id not in
+                    (select id from outfish_full_catalog_snapshots order by id desc limit 5)""")
+            con.commit()
+        return True,None
+    except Exception as e:
+        return False,f'{type(e).__name__}: {str(e)[:180]}'
+
+
+def _restore_full_catalog():
+    db=os.getenv('DATABASE_URL','').strip()
+    if not db: return False
+    try:
+        import base64, gzip, psycopg
+        with psycopg.connect(db,connect_timeout=10) as con:
+            with con.cursor() as cur:
+                cur.execute("select to_regclass('outfish_full_catalog_snapshots')")
+                if not cur.fetchone()[0]: return False
+                cur.execute("""select summary,artifacts,created_at
+                               from outfish_full_catalog_snapshots order by id desc limit 1""")
+                record=cur.fetchone()
+        if not record: return False
+        summary,packed,created=record
+        artifacts={k:gzip.decompress(base64.b64decode(v)) for k,v in packed.items()}
+        with FULL_CATALOG_LOCK:
+            FULL_CATALOG.update(status='cached',error=None,summary=summary,artifacts=artifacts,
+                                last_refresh=str(created),persistence_ok=True)
+        print('FULL_CATALOG_RESTORED',json.dumps({'checked':(summary.get('publication_pipeline') or {}).get('checked'),
+              'created_at':str(created),'artifact_count':len(artifacts)},sort_keys=True),flush=True)
+        return True
+    except Exception as e:
+        print('FULL_CATALOG_RESTORE_FAILED',type(e).__name__,str(e)[:180],flush=True)
+        return False
+
+
+def _run_and_persist_catalog():
+    with FULL_CATALOG_LOCK:
+        if FULL_CATALOG.get('status')=='running': return
+        FULL_CATALOG['status']='running'
     try:
         arts,summary=run_full_catalog_audit()
-        with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='ok',error=None,summary=summary,artifacts=arts)
-        print('FULL_CATALOG_AUDIT_RESULT',json.dumps(summary,sort_keys=True),flush=True)
-        try:
-            import current_product_category_audit as _cat
-            _ts,_cats,_attrs=_cat._latest_taxonomy(DB)
-            _req={}
-            for _a in _attrs:
-                if str(_a.get('required')).casefold() in {'true','1','yes'}:
-                    _req.setdefault(str(_a.get('category_id')),[]).append({k:_a.get(k,'') for k in ('field_id','title_en','title_lv','title_ru','required')})
-            _terms=('paracord','utility cord','utility cords','rope','cord')
-            _hits=[]
-            for _x in _cats:
-                if str(_x.get('allow_add_products')).casefold() not in {'true','1','yes'}: continue
-                _txt=' '.join(str(_x.get(k,'') or '') for k in ('title_en','title_lv','title_lt','title_ee','title_fi','title_ru')).casefold()
-                _matched=[t for t in _terms if t in _txt]
-                if _matched:
-                    _cid=str(_x.get('category_id'))
-                    _hits.append({'category_id':_cid,'parent_id':str(_x.get('parent_id') or ''),'title_en':_x.get('title_en',''),'title_lv':_x.get('title_lv',''),'title_ru':_x.get('title_ru',''),'matched_terms':_matched,'required_fields':_req.get(_cid,[])})
-            print('PILOT_80673_CATEGORY_PROBE',json.dumps({'sku':'80673','ean':'0021563806731','query_terms':_terms,'candidate_count':len(_hits),'candidates':_hits[:30]},ensure_ascii=False,sort_keys=True),flush=True)
-        except Exception as e:
-            print('PILOT_80673_CATEGORY_PROBE_FAILED',type(e).__name__,str(e),flush=True)
-        try:
-            import csv as _csv, io as _io
-            _raw=(arts.get('full-catalog-ready-candidates.csv') or b'').decode('utf-8-sig')
-            _rows=list(_csv.DictReader(_io.StringIO(_raw)))[:10]
-            _top=[{k:r.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_name','product_type','shopify_title','featured_image_url')} for r in _rows]
-            print('FULL_CATALOG_CREATE_CANDIDATES_TOP10',json.dumps(_top,ensure_ascii=False,separators=(',',':')),flush=True)
-        except Exception as e:
-            print('FULL_CATALOG_CREATE_CANDIDATES_TOP10_FAILED',type(e).__name__,str(e),flush=True)
-        return _json(summary)
+        saved,err=_persist_full_catalog(arts,summary)
+        with FULL_CATALOG_LOCK:
+            FULL_CATALOG.update(status='ok',error=None,summary=summary,artifacts=arts,
+                                last_refresh=time.time(),persistence_ok=saved,persistence_error=err)
+        # Compact logs: no customer data, private URLs, product titles, tokens or giant JSON.
+        print('FULL_CATALOG_PIPELINE_COUNTS',json.dumps({
+              'checked':(summary.get('publication_pipeline') or {}).get('checked'),
+              'counts':(summary.get('publication_pipeline') or {}).get('counts'),
+              'phh_access_error':bool(summary.get('phh_access_error')),
+              'persisted':saved,'persistence_error':err,
+              'dataset_hash':(summary.get('publication_pipeline') or {}).get('dataset_hash')
+              },sort_keys=True),flush=True)
     except Exception as e:
-        with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='error',error=f'{type(e).__name__}: {e}')
-        print('FULL_CATALOG_AUDIT_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
-        return _json({'status':'ERROR','error':f'{type(e).__name__}: {e}'},503)
+        with FULL_CATALOG_LOCK:
+            FULL_CATALOG.update(status='error',error=f'{type(e).__name__}: {str(e)[:200]}')
+        print('FULL_CATALOG_AUDIT_FAILED',type(e).__name__,str(e)[:200],flush=True)
+
 
 def _full_catalog_artifact(name,mime):
     with FULL_CATALOG_LOCK: b=FULL_CATALOG['artifacts'].get(name); status=FULL_CATALOG['status']; err=FULL_CATALOG['error']
@@ -762,31 +817,14 @@ def _maybe_run_phh_card_identity_probe_v33():
         print('PHH_CARD_IDENTITY_PROBE_V33_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 def _boot():
-    # Legacy one-shot probes include PHH writes. Never execute them as a side effect
-    # of staging deploy; explicit operations must use a separately authorized runner.
+    # Restore snapshots before expensive network calls. Keep the web server responsive.
     print('OUTFISH_SAFE_BOOT_LEGACY_JOBS_DISABLED',flush=True)
-    try:
-        arts,summary=run_full_catalog_audit()
-        with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='ok',error=None,summary=summary,artifacts=arts)
-        print('FULL_CATALOG_AUDIT_RESULT',json.dumps(summary,sort_keys=True),flush=True)
-    except Exception as e:
-        with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='error',error=f'{type(e).__name__}: {e}')
-        print('FULL_CATALOG_AUDIT_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
-    # Deliberately disabled: old RUN_* environment flags can outlive approvals.
-    print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in ('GOOGLE_SERVICE_ACCOUNT_JSON','SHOPIFY_CLIENT_ID','SHOPIFY_CLIENT_SECRET','DATABASE_URL')},sort_keys=True),flush=True)
-    restored=_restore_latest()
-    if restored:
-        _selftest_recovered_routes()
-        if os.getenv('RUN_READINESS_REFRESH','').strip()=='1':
-            try:
-                refresh()
-                with LOCK:
-                    v=dict(STATE.get('product_xml_validation') or {}); s=dict(STATE.get('summary') or {})
-                print('PRODUCT_XML_READINESS_REFRESH',json.dumps({'publish_gate':v.get('publish_gate'),'ready':v.get('ready_count',v.get('ready')),'blocked':v.get('blocked_count',v.get('blocked')),'dataset_hash':s.get('dataset_hash'),'projected_product_xml_ready':s.get('projected_product_xml_ready')},sort_keys=True),flush=True)
-            except Exception as e:
-                print('PRODUCT_XML_READINESS_REFRESH_FAILED',type(e).__name__,str(e),flush=True)
-        return
-    try:
-        refresh()
-    except Exception: pass
+    restored=_restore_full_catalog()
+    _restore_latest()
+    print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in
+          ('GOOGLE_SERVICE_ACCOUNT_JSON','SHOPIFY_CLIENT_ID','SHOPIFY_CLIENT_SECRET','DATABASE_URL')},
+          sort_keys=True),flush=True)
+    if os.getenv('RUN_FULL_CATALOG_AUDIT','1').strip()=='1':
+        threading.Thread(target=_run_and_persist_catalog,daemon=True).start()
+    print('OUTFISH_STAGING_READONLY_READY',json.dumps({'catalog_cache_restored':restored}),flush=True)
 threading.Thread(target=_boot,daemon=True).start()
