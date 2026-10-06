@@ -742,6 +742,7 @@ def _maybe_run_phh_card_identity_probe_v33():
         print('PHH_CARD_IDENTITY_PROBE_V33_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 def _boot():
+    _maybe_run_gearaid_68150_feature_patch()
     try:
         arts,summary=run_full_catalog_audit()
         with FULL_CATALOG_LOCK: FULL_CATALOG.update(status='ok',error=None,summary=summary,artifacts=arts)
@@ -783,7 +784,6 @@ def _boot():
     _maybe_run_phh_offer_contract_v16()
     _maybe_run_naturehike_gale_patch()
     _maybe_run_gearaid_68150_create()
-    _maybe_run_gearaid_68150_feature_patch()
     _maybe_run_naturehike_gale_create()
     _maybe_run_naturehike_gale_probe()
     _maybe_run_pmp_discovery()
