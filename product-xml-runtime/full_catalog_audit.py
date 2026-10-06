@@ -90,8 +90,14 @@ def run():
         if not candidate_blockers: prelim.append(row)
         else: exc.append({**row,'candidate_blockers':'|'.join(dict.fromkeys(candidate_blockers))})
     # FHM is excluded before any PHH identity lookup. Existing 220 cards are never CREATE candidates.
-    lr=_api_login('v3'); lr.raise_for_status(); phh_token=lr.json()['token']
-    offers=scan_offers(phh_token)
+    # PHH outage must not prevent catalog-wide read-only readiness counts.
+    # All identity-unverified variants remain BLOCKED, never CREATE.
+    phh_token=None; phh_access_error=''
+    try:
+        lr=_api_login('v3'); lr.raise_for_status(); phh_token=lr.json()['token']
+        offers=scan_offers(phh_token)
+    except Exception as e:
+        offers=[]; phh_token=None; phh_access_error=f'{type(e).__name__}: {str(e)[:300]}'
     by_ean=defaultdict(list); by_sku=defaultdict(list)
     for o in offers:
         for x in _offer_eans(o): by_ean[x].append(o)
@@ -112,7 +118,7 @@ def run():
         )
     )
     lookup_eans=[]; seen_lookup_eans=set()
-    for row in lookup_priority:
+    for row in (lookup_priority if phh_token else []):
         ean=_norm(row.get('shopify_barcode'))
         if ean in seen_lookup_eans: continue
         seen_lookup_eans.add(ean); lookup_eans.append(ean)
@@ -223,7 +229,7 @@ def run():
         })
     pipeline_report=pipeline_audit(pipeline_inputs)
     pipeline_rows=pipeline_report.pop('rows')
-    summary={'status':'PASS','read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_36134_category_probe':pilot_category_probe,'excluded_fhm':sum('EXCLUDED_FHM' in x.get('candidate_blockers','') for x in exc),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
+    summary={'status':'PASS' if not phh_access_error else 'DEGRADED_PHH_UNAVAILABLE','phh_access_error':phh_access_error,'read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_36134_category_probe':pilot_category_probe,'excluded_fhm':sum('EXCLUDED_FHM' in x.get('candidate_blockers','') for x in exc),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
     summary['publication_pipeline']=pipeline_report
     return {
         'full-catalog-summary.json':_json(summary),
