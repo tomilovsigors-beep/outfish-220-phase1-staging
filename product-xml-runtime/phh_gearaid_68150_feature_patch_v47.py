@@ -1,0 +1,79 @@
+from __future__ import annotations
+import json,os,time
+from urllib.parse import urljoin
+import requests
+from pmp_api_probe import BASE,_api_login,_api_get
+
+SKU='68150'
+EAN='0021563681505'
+PRODUCT_ID=270344850
+SELLER_ID='9990696'
+# Category 3377: Lithuanuan canonical feature titles, as in the authoritative taxonomy.
+FEATURES=[
+ {'name':'Medžiaga','value':'Mikrofibra'},
+ {'name':'Spalva','value':'Mėlyna'},
+ {'name':'Išmatavimai','value':'51 x 102 cm'},
+ {'name':'Komplektacija','value':'1'},
+]
+PAYLOAD={'product_features':FEATURES,
+         'modifications':[{'sku':SKU,'manufacturer_code':SKU,'tare_deposit_quantity':0}]}
+
+def _all_scalars(x):
+    if isinstance(x,dict):
+        for v in x.values(): yield from _all_scalars(v)
+    elif isinstance(x,list):
+        for v in x: yield from _all_scalars(v)
+    elif isinstance(x,(str,int,float)) and not isinstance(x,bool):
+        yield str(x)
+
+def run():
+    if os.getenv('RUN_GEARAID_68150_CREATE','').strip()=='APPROVED_ONCE':
+        return {'status':'BLOCKED_CREATE_FLAG_STILL_ON','writes':0}
+    if os.getenv('RUN_GEARAID_68150_FEATURE_PATCH','').strip()!='APPROVED_ONCE':
+        return {'status':'SKIPPED_NOT_AUTHORIZED','writes':0}
+    lr=_api_login('v3')
+    if lr is None or not lr.ok:
+        return {'status':'AUTH_FAILED','http_status':None if lr is None else lr.status_code,'writes':0}
+    token=lr.json().get('token')
+    me=_api_get('/v3/sellers/me',token); me.raise_for_status()
+    md=me.json(); seller=str(md.get('id') or (md.get('seller') or {}).get('id') or '')
+    if seller!=SELLER_ID:
+        return {'status':'BLOCKED_SELLER_MISMATCH','seller_id':seller,'writes':0}
+    p=_api_get(f'/v3/products/{PRODUCT_ID}',token)
+    if p.status_code!=200:
+        return {'status':'BLOCKED_PRODUCT_NOT_READABLE','http_status':p.status_code,'writes':0}
+    obj=p.json()
+    scalars=set(_all_scalars(obj))
+    if not ({SKU,EAN} & scalars):
+        return {'status':'BLOCKED_PRODUCT_IDENTITY_MISMATCH','product_id':PRODUCT_ID,'writes':0}
+    er=requests.post(urljoin(BASE,f'/v3/sellers/{seller}/product/import/execution'),
+        headers={'Authorization':'Pigu-mp '+token,'Accept':'application/json','Content-Type':'application/json'},timeout=30)
+    if er.status_code!=201:
+        return {'status':'EXECUTION_FAILED','http_status':er.status_code,'writes':0}
+    execution_id=str(er.json().get('id') or '')
+    if not execution_id:
+        return {'status':'EXECUTION_ID_MISSING','writes':0}
+    rr=requests.patch(urljoin(BASE,f'/v3/sellers/product/import/execution/{execution_id}'),
+        json=PAYLOAD,
+        headers={'Authorization':'Pigu-mp '+token,'Accept':'application/json','Content-Type':'application/json'},
+        timeout=40)
+    try: response=rr.json()
+    except Exception: response={'raw':rr.text[:800]}
+    out={'status':'SUBMITTED' if rr.status_code==200 else 'VALIDATION_ERROR',
+         'product_id':PRODUCT_ID,'sku':SKU,'ean':EAN,'execution_id':execution_id,
+         'http_status':rr.status_code,'response':response,
+         'features':FEATURES,'changes_only':'product_features',
+         'safety':{'product_creates':0,'stock_writes':0,'price_writes':0,'Shopify_writes':0,'Master_writes':0}}
+    if rr.status_code==200:
+        for _ in range(12):
+            time.sleep(3)
+            q=_api_get(f'/v3/sellers/{seller}/product/import/execution/{execution_id}/results?limit=20&offset=0',token)
+            try: items=(q.json().get('items') or [])
+            except Exception: items=[]
+            target=[it for it in items if str(it.get('sku'))==SKU]
+            if target and target[0].get('status') in ('success','error'):
+                out['import_result']=target[0]
+                out['status']=target[0]['status'].upper()
+                break
+    print('GEARAID_68150_FEATURE_PATCH_RESULT '+json.dumps(out,ensure_ascii=False,sort_keys=True),flush=True)
+    return out
