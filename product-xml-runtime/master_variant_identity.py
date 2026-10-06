@@ -55,7 +55,14 @@ def resolve_variant(variant,index):
     linked=by_vid.get(vid,[]) if vid else []
     if linked:
         if len(linked)!=1: return None,"CONFLICT_DUPLICATE_VARIANT_ID"
-        return linked[0][1],"EXACT_VARIANT_ID"
+        row=linked[0][1]
+        src_sku=clean(row.get("shopify_sku"))
+        src_barcode=gtin13(row.get("shopify_barcode"))
+        if src_sku and sku and src_sku!=sku:
+            return None,"CONFLICT_SHOPIFY_SKU"
+        if src_barcode and barcode and src_barcode!=barcode:
+            return None,"CONFLICT_SHOPIFY_GTIN"
+        return row,"EXACT_VARIANT_ID"
     if not sku or not barcode: return None,"INSUFFICIENT_SKU_GTIN"
     matches=by_pair.get((sku,barcode),[])
     if len(matches)>1: return None,"CONFLICT_DUPLICATE_SKU_GTIN"
@@ -87,4 +94,7 @@ def selftest():
     assert resolve_variant(live,master_variant_index([example,example]))[0] is None
     assert gtin13("021563105926")=="0021563105926"
     assert not gtin13("021563105927")
+    same_id={**example,"shopify_variant_id":"123"}
+    assert resolve_variant(live,master_variant_index([same_id]))[1]=="EXACT_VARIANT_ID"
+    assert resolve_variant({**live,"shopify_sku":"UNRELATED"},master_variant_index([same_id]))[1]=="CONFLICT_SHOPIFY_SKU"
     return True
