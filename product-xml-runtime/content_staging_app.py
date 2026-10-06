@@ -311,6 +311,15 @@ def full_catalog_ready_candidates(): return _full_catalog_artifact('full-catalog
 @app.get('/full-catalog/exceptions.csv')
 def full_catalog_exceptions(): return _full_catalog_artifact('full-catalog-exceptions.csv','text/csv')
 
+@app.get('/phh-gearaid-10592-readonly-v52.json')
+def phh_gearaid_10592_readonly_v52():
+    try:
+        from phh_gearaid_10592_readonly_v52 import run
+        return _json(run())
+    except Exception as e:
+        return _json({'status':'BLOCKED_READONLY_ERROR','error_type':type(e).__name__,'writes':0},503)
+
+
 @app.get('/phh-bushmen-bushbed-readonly-v51.json')
 def phh_bushmen_bushbed_readonly_v51():
     try:
