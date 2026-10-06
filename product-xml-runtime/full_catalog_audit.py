@@ -299,6 +299,44 @@ def run():
     pipeline_report=pipeline_audit(pipeline_inputs)
     pipeline_rows=pipeline_report.pop('rows')
     summary={'status':'PASS' if not phh_access_error else 'DEGRADED_PHH_UNAVAILABLE','phh_access_error':phh_access_error,'read_only':True,'shopify_pages':pages,'shopify_variants':len(variants),'master_rows':len(master),'matched':counts['MATCHED'],'new':counts['NEW'],'ambiguous':counts['AMBIGUOUS'],'duplicate':counts['DUPLICATE'],'missing_in_shopify':counts['MISSING_IN_SHOPIFY'],'preliminary_ready_candidates':len(prelim),'identity_lookup_limit':pilot_lookup_limit,'unique_barcode_lookups':len(lookup_eans),'create_candidates_after_identity':len(ready),'identity_negative_evidence_policy':'FAIL_CLOSED','top_create_candidates':[{k:row.get(k,'') for k in ('shopify_sku','shopify_barcode','vendor','shopify_category_id','shopify_category_name','product_type','shopify_title')} for row in ready[:10]],'pilot_36134_category_probe':pilot_category_probe,'excluded_fhm':sum('EXCLUDED_FHM' in x.get('candidate_blockers','') for x in exc),'identity_status_counts':dict(identity_counts),'exceptions':len(exc),'elapsed_seconds':round(time.time()-started,3),'note':'Preliminary ready means identity + active + title + description + featured image only; PHH category/attributes/image-count/package gates are evaluated downstream.'}
+    # Separate source-data gaps from PHH identity safety blockers.
+    # Values are live Shopify variants + exact current Master identity snapshots;
+    # no write to Master, Shopify, price or stock is ever performed.
+    barcode_profile=Counter()
+    price_profile=Counter()
+    locale_profile=Counter()
+    for v in variants:
+        if _norm(v.get('vendor')).casefold()=='fhm': continue
+        raw=_norm(v.get('shopify_barcode'))
+        if not raw:
+            barcode_profile['MISSING']+=1
+        elif _ean13(raw):
+            barcode_profile['VALID_UPC12' if len(raw)==12 else 'VALID_EAN13']+=1
+        elif raw.isdigit() and len(raw)==8:
+            barcode_profile['UNVERIFIED_EAN8']+=1
+        elif raw.isdigit() and len(raw) in (12,13):
+            barcode_profile['INVALID_CHECK_DIGIT']+=1
+        else:
+            barcode_profile['OTHER_UNSUPPORTED']+=1
+        if not _norm(v.get('shopify_sku')):
+            barcode_profile['MISSING_SKU']+=1
+        try:
+            price=float(v.get('shopify_price_live'))
+            price_profile['BELOW_10_EUR' if price<10 else 'AT_LEAST_10_EUR']+=1
+        except (TypeError,ValueError):
+            price_profile['UNKNOWN']+=1
+        vid=_norm(v.get('shopify_variant_id'))
+        matching=master_by_vid.get(vid,[])
+        master=matching[0][1] if len(matching)==1 else {}
+        for loc in ('lt','lv','ee','ru','fi'):
+            if (_norm(master.get('220_title_'+loc)) and
+                    _norm(master.get('220_description_'+loc+'_html')) and
+                    _norm(master.get('220_supplier_code_'+loc))==_norm(v.get('shopify_sku'))):
+                locale_profile['MASTER_PRESENT_'+loc.upper()]+=1
+        if len(matching)==1: locale_profile['EXACT_MASTER_VARIANT_LINK']+=1
+    summary['source_quality']={'barcode_non_fhm':dict(barcode_profile),
+              'live_price_non_fhm':dict(price_profile),
+              'locale_coverage_non_fhm':dict(locale_profile)}
     summary['category_evidence']={
         'source':'cached_v4_exact_sku_ean_only',
         'artifact_status':category_artifact_status,
