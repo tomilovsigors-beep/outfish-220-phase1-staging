@@ -101,9 +101,18 @@
         "evidence_urls": [
           "https://outfish.lv/en/products/neoprene-cuffs-for-fishing-jacket",
           "https://outfish.lv/en/products/waterproof-socks-outfish-black",
-          "https://eur-lex.europa.eu/legal-content/EN/ALL/?uri=oj:JOL_2023_135_R_0001"
+          "https://eur-lex.europa.eu/legal-content/EN/ALL/?uri=oj:JOL_2023_135_R_0001",
+          "https://outfish.lv/en/collections/fishing-clothes-outdoor-wear/products/hoodie-wave-light-grey",
+          "https://outfish.lv/en/products/bahilas-samstrong-gaiters-for-snow"
         ],
-        "scope_rule": "Apply only where live Shopify product is explicitly marketed under Outfish name/trademark; do not apply to generic/non-Outfish titles solely because vendor=Outfish."
+        "scope_rule": "Apply only where live Shopify product is explicitly marketed under Outfish name/trademark; do not apply to generic/non-Outfish titles solely because vendor=Outfish.",
+        "verified_product_titles": [
+          "Hoodie Wave No logo Light Grey",
+          "Fishing Cap Rapper Cotton Olive/Black",
+          "Suede Cap with Summer Patch",
+          "Mask Mark Buff Sun Protection UPF 50+ Print Khaki",
+          "Zipped Hoodie Wave V2 Black"
+        ]
       },
       "phh_status": "PARTIAL_COHORT_OUTFISH_BRANDED_READY",
       "eu_responsible_person": {
