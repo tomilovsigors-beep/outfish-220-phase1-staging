@@ -418,6 +418,40 @@ def existing_catalog_autocheck_status():
                       'summary':EXISTING_AUTOCHECK.get('summary') or {},
                       'last_refresh':EXISTING_AUTOCHECK.get('last_refresh')})
 
+@app.get('/phh/existing-catalog-autocheck/manufacturer-groups.json')
+def existing_catalog_autocheck_manufacturer_groups():
+    from collections import Counter
+    code='manufacturer_representative_info_missing'
+    with EXISTING_AUTOCHECK_LOCK:
+        status=EXISTING_AUTOCHECK.get('status')
+        error=EXISTING_AUTOCHECK.get('error')
+        source_rows=list(EXISTING_AUTOCHECK.get('rows') or [])
+        last_refresh=EXISTING_AUTOCHECK.get('last_refresh')
+    rows=[]
+    groups={}
+    for src in source_rows:
+        codes=set(x for x in str(src.get('phh_autocheck_errors') or '').split('|') if x)
+        if code not in codes:
+            continue
+        row={k:src.get(k) for k in (
+            'shopify_variant_id','shopify_sku','shopify_barcode','shopify_title','variant_title',
+            'vendor','pigu_external_id','offer_id','modification_id','phh_autocheck_state',
+            'phh_autocheck_errors','phh_autocheck_locales') if k in src}
+        rows.append(row)
+        vendor=str(src.get('vendor') or '').strip() or '(blank)'
+        bucket=groups.setdefault(vendor,{'vendor':vendor,'count':0,'sample_skus':[],'pigu_external_ids':[]})
+        bucket['count']+=1
+        sku=str(src.get('shopify_sku') or '').strip()
+        if sku and sku not in bucket['sample_skus'] and len(bucket['sample_skus'])<8:
+            bucket['sample_skus'].append(sku)
+        pid=str(src.get('pigu_external_id') or '').strip()
+        if pid and pid not in bucket['pigu_external_ids'] and len(bucket['pigu_external_ids'])<8:
+            bucket['pigu_external_ids'].append(pid)
+    grouped=sorted(groups.values(),key=lambda x:(-x['count'],x['vendor'].lower()))
+    return _json({'status':status,'error':error,'code':code,'count':len(rows),
+                  'group_count':len(grouped),'groups':grouped,'rows':rows,
+                  'last_refresh':last_refresh,'phh_writes':0})
+
 @app.get('/phh/existing-catalog-autocheck/start')
 def existing_catalog_autocheck_start_get():
     with EXISTING_AUTOCHECK_LOCK:
