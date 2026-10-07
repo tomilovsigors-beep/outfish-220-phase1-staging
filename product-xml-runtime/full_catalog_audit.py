@@ -340,8 +340,44 @@ def run():
                 locale_profile['MASTER_PRESENT_'+loc.upper()]+=1
         if basis in ('EXACT_VARIANT_ID','EXACT_SKU_GTIN'):
             locale_profile['SAFE_MASTER_IDENTITY_LINK']+=1
+    # Recovery analysis for missing/invalid live Shopify GTIN.
+    # These are candidates for evidence review only; they never satisfy the
+    # publication EAN gate automatically.
+    master_gtin_recovery=Counter()
+    master_gtin_examples=[]
+    for v in variants:
+        if _norm(v.get('vendor')).casefold()=='fhm': continue
+        live_ean=_ean13(_norm(v.get('shopify_barcode')))
+        if live_ean: continue
+        sku=_norm(v.get('shopify_sku'))
+        if not sku:
+            master_gtin_recovery['NO_SKU']+=1
+            continue
+        candidates=master_by_sku.get(sku,[])
+        valid=[]
+        for rowno,row in candidates:
+            candidate=_ean13(_norm(row.get('220_ean')))
+            if candidate:
+                valid.append((rowno,row,candidate))
+        unique_eans=sorted({x[2] for x in valid})
+        if len(unique_eans)==1 and valid:
+            master_gtin_recovery['UNIQUE_MASTER_220_EAN_CANDIDATE']+=1
+            if len(master_gtin_examples)<25:
+                master_gtin_examples.append({'sku':sku,'candidate_ean':unique_eans[0],
+                    'master_rows':'|'.join(str(x[0]) for x in valid),
+                    'live_barcode':_norm(v.get('shopify_barcode')),
+                    'status':'REVIEW_REQUIRED'})
+        elif len(unique_eans)>1:
+            master_gtin_recovery['CONFLICTING_MASTER_EANS']+=1
+        elif candidates:
+            master_gtin_recovery['MASTER_MATCH_NO_VALID_220_EAN']+=1
+        else:
+            master_gtin_recovery['NO_MASTER_SKU_MATCH']+=1
     summary['master_identity_resolution']={'counts':dict(master_identity_counts),
         'exact_links':master_identity_counts['EXACT_VARIANT_ID']+master_identity_counts['EXACT_SKU_GTIN'],
+        'gtin_recovery_review_counts':dict(master_gtin_recovery),
+        'gtin_recovery_examples':master_gtin_examples,
+        'gtin_recovery_authorizes_publish':False,
         'writes':0,'basis':'exact_shopify_variant_id_or_unique_sku_gtin'}
     summary['source_quality']={'barcode_non_fhm':dict(barcode_profile),
               'live_price_non_fhm':dict(price_profile),
