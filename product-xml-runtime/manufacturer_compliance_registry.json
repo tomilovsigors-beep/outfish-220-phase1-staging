@@ -438,6 +438,22 @@
       "affected_error_variants": 3,
       "price_eur": 9,
       "status": "EXCLUDED_FROM_220"
+    },
+    {
+      "rule_id": "PRICE_LT_10_BBQ_80066",
+      "reason": "PROJECT_PRICE_LT_10_EUR",
+      "shopify_product_handle": "bar-be-quick-single-use-grill",
+      "shopify_sku": "80066",
+      "price_eur": 5.9,
+      "status": "EXCLUDED_FROM_220"
+    },
+    {
+      "rule_id": "PRICE_LT_10_BBQ_80073",
+      "reason": "PROJECT_PRICE_LT_10_EUR",
+      "shopify_product_handle": "bar-be-quick-fsc-one-time-grill-instant-barbecue-copy",
+      "shopify_sku": "80073",
+      "price_eur": 7.9,
+      "status": "EXCLUDED_FROM_220"
     }
   ]
 }
