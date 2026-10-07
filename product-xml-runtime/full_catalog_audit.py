@@ -57,12 +57,15 @@ def _shopify_translation_index():
     token=_shopify_token(); shop=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
     url=f'https://{shop}/admin/api/{API_VERSION}/graphql.json'
     query='''query TranslationCoverage($after:String){translatableResources(resourceType:PRODUCT,first:250,after:$after){pageInfo{hasNextPage endCursor} nodes{resourceId lt:translations(locale:"lt"){key value outdated} lv:translations(locale:"lv"){key value outdated} et:translations(locale:"et"){key value outdated} ru:translations(locale:"ru"){key value outdated} fi:translations(locale:"fi"){key value outdated}}}}'''
-    out={}; after=None; pages=0; source_counts=Counter()
+    out={}; after=None; pages=0; source_counts=Counter(); status='PASS'; error=''
     while True:
         r=requests.post(url,headers={'X-Shopify-Access-Token':token,'Content-Type':'application/json'},
                         json={'query':query,'variables':{'after':after}},timeout=90)
         r.raise_for_status(); p=r.json()
-        if p.get('errors'): raise RuntimeError('Shopify translation GraphQL errors: '+json.dumps(p['errors'])[:1000])
+        if p.get('errors'):
+            error=json.dumps(p['errors'],ensure_ascii=False)[:1000]
+            status='BLOCKED_SOURCE_SCOPE' if 'read_translations' in error else 'ERROR'
+            break
         conn=((p.get('data') or {}).get('translatableResources') or {})
         for node in conn.get('nodes') or []:
             locout={}
@@ -81,10 +84,10 @@ def _shopify_translation_index():
         if not pi.get('hasNextPage'): break
         after=pi.get('endCursor')
         if not after or pages>50: break
-    return out,pages,dict(source_counts)
+    return out,pages,dict(source_counts),status,error
 
 def run():
-    started=time.time(); master=_master_rows(); variants,pages=_shopify_all_variants(); translations,translation_pages,translation_source_counts=_shopify_translation_index()
+    started=time.time(); master=_master_rows(); variants,pages=_shopify_all_variants(); translations,translation_pages,translation_source_counts,translation_status,translation_error=_shopify_translation_index()
     master_by_vid=defaultdict(list); master_by_sku=defaultdict(list); master_by_ean=defaultdict(list)
     for i,m in enumerate(master,2):
         vid=_norm(m.get('shopify_variant_id')); sku=_norm(m.get('220_sku') or m.get('shopify_sku')); ean=_norm(m.get('220_ean') or m.get('shopify_barcode'))
@@ -475,6 +478,8 @@ def run():
               'live_price_non_fhm':dict(price_profile),
               'locale_coverage_non_fhm':dict(locale_profile)}
     summary['translation_evidence']={
+        'status':translation_status,
+        'source_error_class':'READ_TRANSLATIONS_SCOPE_MISSING' if translation_status=='BLOCKED_SOURCE_SCOPE' else ('OTHER' if translation_error else ''),
         'shopify_translation_pages':translation_pages,
         'fresh_title_body_by_locale':translation_source_counts,
         'translation_queue_variants':len(translation_queue),
