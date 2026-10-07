@@ -368,8 +368,19 @@ def run():
             if matched_ean and sku in skus:
                 consistent.append(offer)
         known_68150=(sku=='68150' and barcode in ('0021563681505','021563681505'))
+        matched_offer=consistent[0] if consistent else None
         if consistent or known_68150:
             phh_identity={'status':'EXISTING','identity_verified':True}
+            if matched_offer:
+                mod=matched_offer.get('modification') or {}
+                phh_identity.update({
+                    'offer_id':_norm(matched_offer.get('id')),
+                    'offer_status':_norm(matched_offer.get('status')),
+                    'offer_amount':matched_offer.get('amount'),
+                    'offer_price':matched_offer.get('sell_price'),
+                    'modification_id':_norm(mod.get('id')),
+                    'pigu_external_id':_norm(mod.get('pigu_external_id'))
+                })
             if known_68150: phh_identity['product_id']='270344850'
         elif possible_offers:
             phh_identity={'status':'CONFLICT','identity_verified':False}
@@ -431,6 +442,15 @@ def run():
                     'main_neutral_verified':'YES' if image_ev.get('main_neutral_verified') else 'NO',
                     'master_basis':master_basis,'price_eur':_norm(v.get('shopify_price_live')),
                     'phh_identity_state':phh_identity.get('status',''),
+                    'offer_id':phh_identity.get('offer_id',''),
+                    'offer_status':phh_identity.get('offer_status',''),
+                    'offer_amount':phh_identity.get('offer_amount',''),
+                    'offer_price':phh_identity.get('offer_price',''),
+                    'modification_id':phh_identity.get('modification_id',''),
+                    'pigu_external_id':phh_identity.get('pigu_external_id',''),
+                    'shopify_stock_live':v.get('shopify_stock_live'),
+                    'future_stock_rule_result':0 if (v.get('shopify_stock_live') or 0)==0 else max(3,(v.get('shopify_stock_live') or 0)),
+                    'price_match_diagnostic':'YES' if str(phh_identity.get('offer_price',''))==str(v.get('shopify_price_live','')) else 'NO',
                     'phh_create_authorized':'NO'})
             if base_ok and category_confirmed and image_ev and image_ev.get('two_images_verified') and image_ev.get('main_neutral_verified'):
                 readiness_funnel['+MAIN_NEUTRAL']+=1
@@ -547,10 +567,27 @@ def run():
               'locale_coverage_non_fhm':dict(locale_profile)}
     near_ready_identity_counts=Counter(r.get('phh_identity_state') for r in near_ready_rows)
     near_ready_category_counts=Counter(r.get('phh_category_id') for r in near_ready_rows)
+    near_ready_offer_status_counts=Counter(_norm(r.get('offer_status')).upper() or 'NO_OFFER' for r in near_ready_rows if r.get('phh_identity_state')=='EXISTING')
+    existing_offer_health=Counter()
+    for r in near_ready_rows:
+        if r.get('phh_identity_state')!='EXISTING': continue
+        st=_norm(r.get('offer_status')).upper()
+        if st=='ACTIVE': existing_offer_health['ACTIVE']+=1
+        elif st: existing_offer_health['NON_ACTIVE']+=1
+        else: existing_offer_health['STATUS_UNKNOWN']+=1
+        try:
+            amt=int(float(r.get('offer_amount')))
+            existing_offer_health['STOCK_POSITIVE' if amt>0 else 'STOCK_ZERO']+=1
+        except Exception:
+            existing_offer_health['STOCK_UNKNOWN']+=1
+        if r.get('price_match_diagnostic')=='YES': existing_offer_health['PRICE_MATCH_SHOPIFY']+=1
+        else: existing_offer_health['PRICE_DIFFERS_OR_FORMAT_UNKNOWN']+=1
     summary['near_ready_summary']={
         'variants':len(near_ready_rows),
         'identity_counts':dict(near_ready_identity_counts),
         'phh_category_counts':dict(near_ready_category_counts),
+        'offer_status_counts':dict(near_ready_offer_status_counts),
+        'existing_offer_health':dict(existing_offer_health),
         'create_candidates_before_absence_proof':sum(1 for r in near_ready_rows if r.get('phh_identity_state')!='EXISTING'),
         'existing_not_create_candidates':near_ready_identity_counts.get('EXISTING',0),
         'all_categories_ui_api_contract_checked':all(str(k) in ui_contract_conflicts for k in near_ready_category_counts),
@@ -609,7 +646,7 @@ def run():
         'catalog-category-backlog.csv':_csv(backlog_rows,['shopify_category_id','shopify_category_name','variants','mapped_v4','unmapped_or_review']),
         'catalog-category-rules.csv':_csv(exact_category_rule_rows,['shopify_category_id','shopify_category_name','shopify_terminal','variant_count','vendor_count','phh_category_id','phh_category_title','status','confidence','basis','phh_write']),
         'catalog-translation-queue.csv':_csv(translation_queue,['shopify_product_id','shopify_variant_id','sku','vendor','shopify_title','targets','preferred_source','writes']),
-        'near-ready-cohort.csv':_csv(near_ready_rows,['shopify_variant_id','sku','ean','vendor','shopify_category_name','phh_category_id','category_basis','contract_conflict','two_images_600_direct','main_neutral_verified','master_basis','price_eur','phh_identity_state','phh_create_authorized']),
+        'near-ready-cohort.csv':_csv(near_ready_rows,['shopify_variant_id','sku','ean','vendor','shopify_category_name','phh_category_id','category_basis','contract_conflict','two_images_600_direct','main_neutral_verified','master_basis','price_eur','phh_identity_state','offer_id','offer_status','offer_amount','offer_price','modification_id','pigu_external_id','shopify_stock_live','future_stock_rule_result','price_match_diagnostic','phh_create_authorized']),
         'full-catalog-ready-candidates.csv':_csv(ready,ready_fields),
         'full-catalog-exceptions.csv':_csv(exc,exc_fields)
     },summary
