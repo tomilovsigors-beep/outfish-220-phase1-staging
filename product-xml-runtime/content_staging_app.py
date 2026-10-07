@@ -422,6 +422,7 @@ def existing_catalog_autocheck_status():
 def existing_catalog_autocheck_manufacturer_groups():
     from collections import Counter
     code='manufacturer_representative_info_missing'
+    vendor_filter=str(request.args.get('vendor') or '').strip().casefold()
     with EXISTING_AUTOCHECK_LOCK:
         status=EXISTING_AUTOCHECK.get('status')
         error=EXISTING_AUTOCHECK.get('error')
@@ -433,12 +434,14 @@ def existing_catalog_autocheck_manufacturer_groups():
         codes=set(x for x in str(src.get('phh_autocheck_errors') or '').split('|') if x)
         if code not in codes:
             continue
+        vendor=str(src.get('vendor') or '').strip() or '(blank)'
+        if vendor_filter and vendor.casefold()!=vendor_filter:
+            continue
         row={k:src.get(k) for k in (
             'shopify_variant_id','shopify_sku','shopify_barcode','shopify_title','variant_title',
             'vendor','pigu_external_id','offer_id','modification_id','phh_autocheck_state',
             'phh_autocheck_errors','phh_autocheck_locales') if k in src}
         rows.append(row)
-        vendor=str(src.get('vendor') or '').strip() or '(blank)'
         bucket=groups.setdefault(vendor,{'vendor':vendor,'count':0,'sample_skus':[],'pigu_external_ids':[]})
         bucket['count']+=1
         sku=str(src.get('shopify_sku') or '').strip()
@@ -448,7 +451,7 @@ def existing_catalog_autocheck_manufacturer_groups():
         if pid and pid not in bucket['pigu_external_ids'] and len(bucket['pigu_external_ids'])<8:
             bucket['pigu_external_ids'].append(pid)
     grouped=sorted(groups.values(),key=lambda x:(-x['count'],x['vendor'].lower()))
-    return _json({'status':status,'error':error,'code':code,'count':len(rows),
+    return _json({'status':status,'error':error,'code':code,'vendor_filter':vendor_filter or None,'count':len(rows),
                   'group_count':len(grouped),'groups':grouped,'rows':rows,
                   'last_refresh':last_refresh,'phh_writes':0})
 
