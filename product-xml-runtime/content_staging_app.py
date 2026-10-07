@@ -462,21 +462,53 @@ def existing_catalog_autocheck_manufacturer_groups():
         pid=str(src.get('pigu_external_id') or '').strip()
         if pid and pid not in bucket['pigu_external_ids'] and len(bucket['pigu_external_ids'])<8:
             bucket['pigu_external_ids'].append(pid)
+    live_join=str(request.args.get('live') or '').strip()=='1'
+    live_by_variant={}
+    if live_join and rows:
+        try:
+            from app import _shopify_token
+            token=_shopify_token()
+            shop=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
+            ids=sorted({str(r.get('shopify_variant_id') or '').strip() for r in rows if str(r.get('shopify_variant_id') or '').strip()})
+            query='''query ComplianceVariants($ids:[ID!]!){nodes(ids:$ids){... on ProductVariant{id sku barcode title product{id title vendor productType status tags}}}}'''
+            for i in range(0,len(ids),50):
+                batch=ids[i:i+50]
+                resp=requests.post(f'https://{shop}/admin/api/2026-07/graphql.json',headers={'X-Shopify-Access-Token':token,'Content-Type':'application/json'},json={'query':query,'variables':{'ids':batch}},timeout=90)
+                resp.raise_for_status()
+                payload=resp.json()
+                if payload.get('errors'):
+                    raise RuntimeError('Shopify GraphQL errors: '+json.dumps(payload['errors'])[:1200])
+                for node in ((payload.get('data') or {}).get('nodes') or []):
+                    if node and node.get('id'):
+                        live_by_variant[str(node['id'])]=node
+            for row in rows:
+                node=live_by_variant.get(str(row.get('shopify_variant_id') or '').strip()) or {}
+                product=node.get('product') or {}
+                row['live_shopify_sku']=node.get('sku')
+                row['live_shopify_barcode']=node.get('barcode')
+                row['live_variant_title']=node.get('title')
+                row['live_product_title']=product.get('title')
+                row['live_product_vendor']=product.get('vendor')
+                row['live_product_type']=product.get('productType')
+                row['live_product_status']=product.get('status')
+                row['live_product_tags']=product.get('tags') or []
+        except Exception as e:
+            return _json({'status':'LIVE_SHOPIFY_JOIN_FAILED','error':f'{type(e).__name__}: {str(e)[:250]}','phh_writes':0},502)
     grouped=sorted(groups.values(),key=lambda x:(-x['count'],x['vendor'].lower()))
     title_prefix_counts=Counter()
     fhm_title_count=0
     compact_rows=[]
     for row in rows:
-        title=str(row.get('shopify_title') or row.get('220_title') or '').strip()
+        title=str(row.get('live_product_title') or row.get('shopify_title') or row.get('220_title') or '').strip()
         prefix=(title.split()[0] if title else '(blank)')
         title_prefix_counts[prefix]+=1
-        if 'FHM' in title.upper().split():
+        if 'FHM' in title.upper().split() or any(str(t).upper()=='FHM' for t in (row.get('live_product_tags') or [])):
             fhm_title_count+=1
-        compact_rows.append({k:row.get(k) for k in ('shopify_variant_id','shopify_sku','shopify_barcode','shopify_title','variant_title','product_type','pigu_external_id','offer_id','modification_id')})
+        compact_rows.append({k:row.get(k) for k in ('shopify_variant_id','shopify_sku','shopify_barcode','shopify_title','variant_title','product_type','pigu_external_id','offer_id','modification_id','live_shopify_sku','live_shopify_barcode','live_variant_title','live_product_title','live_product_vendor','live_product_type','live_product_status','live_product_tags')})
     compact=str(request.args.get('compact') or '').strip()=='1'
     return _json({'status':status,'error':error,'code':code,'vendor_filter':vendor_filter or None,'count':len(rows),
                   'group_count':len(grouped),'groups':grouped,
-                  'title_prefix_counts':dict(title_prefix_counts),'fhm_title_count':fhm_title_count,
+                  'title_prefix_counts':dict(title_prefix_counts),'fhm_title_count':fhm_title_count,'live_shopify_join':live_join,
                   'rows':compact_rows if compact else rows,
                   'last_refresh':last_refresh,'phh_writes':0})
 
