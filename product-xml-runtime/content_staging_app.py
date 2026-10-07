@@ -242,6 +242,11 @@ def phh_category_contract():
                     'required_fields':req,'required_count':len(req)})
     return _json({'status':'PASS','taxonomy_summary':summary,'categories':out,'writes':0})
 
+@app.get('/phh/attribute-contract-digest.json')
+def phh_attribute_contract_digest():
+    from pmp_attribute_contract_digest_v11j import run
+    return _json(run())
+
 @app.get('/pmp-openapi-digest.json')
 def pmp_openapi_digest():
     from pmp_openapi_digest import run
