@@ -7,7 +7,7 @@ from content_runtime import build_snapshot, persist_snapshot
 from master_bulk_write import run_controlled_master_write, EXPECTED_DATASET_HASH
 from full_catalog_audit import run as run_full_catalog_audit
 
-app=Flask(__name__); LOCK=threading.RLock(); FULL_CATALOG_LOCK=threading.RLock(); FULL_CATALOG={'status':'not_run','error':None,'summary':{},'artifacts':{}}; STATE={'status':'starting','error':None,'last_refresh':None,'summary':{},'artifacts':{},'product_xml_validation':{},'persistence_ok':False,'persistence_error':None,'recovered_from_postgres':False,'master_write':None}
+app=Flask(__name__); LOCK=threading.RLock(); FULL_CATALOG_LOCK=threading.RLock(); EXISTING_AUTOCHECK_LOCK=threading.RLock(); EXISTING_AUTOCHECK={'status':'not_run','error':None,'summary':{},'rows':[],'csv':b''}; FULL_CATALOG={'status':'not_run','error':None,'summary':{},'artifacts':{}}; STATE={'status':'starting','error':None,'last_refresh':None,'summary':{},'artifacts':{},'product_xml_validation':{},'persistence_ok':False,'persistence_error':None,'recovered_from_postgres':False,'master_write':None}
 
 # Early read-only taxonomy probe for the single-product pilot. Runs before the heavy catalog audit.
 try:
@@ -291,6 +291,135 @@ def v11_product_attribute_readiness(): return _persisted_v11_artifact('v11-produ
 @app.get('/v11/v11-product-required-attributes.csv')
 def v11_product_required_attributes(): return _persisted_v11_artifact('v11-product-required-attributes.csv','text/csv')
 
+
+def _existing_autocheck_csv(rows):
+    fields=['shopify_variant_id','sku','ean','vendor','phh_category_id','offer_id','offer_status',
+            'offer_amount','offer_price','modification_id','pigu_external_id','shopify_stock_live',
+            'shopify_price_live','phh_autocheck_state','phh_autocheck_errors','phh_autocheck_locales','writes']
+    b=io.StringIO(); w=csv.DictWriter(b,fieldnames=fields,extrasaction='ignore',lineterminator='\n')
+    w.writeheader(); w.writerows(rows)
+    return b.getvalue().encode('utf-8')
+
+
+def _persist_existing_autocheck(summary,rows):
+    db=os.getenv('DATABASE_URL','').strip()
+    if not db: return False,'DATABASE_URL_MISSING'
+    try:
+        import psycopg
+        with psycopg.connect(db,connect_timeout=10) as con:
+            with con.cursor() as cur:
+                cur.execute("""create table if not exists outfish_existing_autocheck_snapshots(
+                    id bigint generated always as identity primary key,
+                    created_at timestamptz not null default now(),
+                    summary jsonb not null, rows jsonb not null)""")
+                cur.execute("insert into outfish_existing_autocheck_snapshots(summary,rows) values(%s::jsonb,%s::jsonb)",
+                            (json.dumps(summary),json.dumps(rows)))
+                cur.execute("""delete from outfish_existing_autocheck_snapshots where id not in
+                    (select id from outfish_existing_autocheck_snapshots order by id desc limit 5)""")
+            con.commit()
+        return True,None
+    except Exception as e:
+        return False,f'{type(e).__name__}: {str(e)[:180]}'
+
+
+def _restore_existing_autocheck():
+    db=os.getenv('DATABASE_URL','').strip()
+    if not db: return False
+    try:
+        import psycopg
+        with psycopg.connect(db,connect_timeout=10) as con:
+            with con.cursor() as cur:
+                cur.execute("select to_regclass('outfish_existing_autocheck_snapshots')")
+                if not cur.fetchone()[0]: return False
+                cur.execute("select summary,rows,created_at from outfish_existing_autocheck_snapshots order by id desc limit 1")
+                rec=cur.fetchone()
+        if not rec: return False
+        summary,rows,created=rec
+        if isinstance(summary,str): summary=json.loads(summary)
+        if isinstance(rows,str): rows=json.loads(rows)
+        with EXISTING_AUTOCHECK_LOCK:
+            EXISTING_AUTOCHECK.update(status='cached',error=None,summary=summary,rows=rows,
+                                      csv=_existing_autocheck_csv(rows),last_refresh=str(created))
+        return True
+    except Exception as e:
+        print('EXISTING_AUTOCHECK_RESTORE_FAILED',type(e).__name__,str(e)[:180],flush=True)
+        return False
+
+
+def _run_existing_catalog_autocheck():
+    with EXISTING_AUTOCHECK_LOCK:
+        if EXISTING_AUTOCHECK.get('status')=='running': return
+        EXISTING_AUTOCHECK.update(status='running',error=None)
+    try:
+        with FULL_CATALOG_LOCK:
+            source=FULL_CATALOG.get('artifacts',{}).get('all-existing-offers.csv')
+        if not source:
+            raise RuntimeError('all-existing-offers.csv unavailable; refresh full catalog first')
+        offers=list(csv.DictReader(io.StringIO(source.decode('utf-8-sig'))))
+        ids=[str(r.get('pigu_external_id') or '').strip() for r in offers
+             if str(r.get('pigu_external_id') or '').strip().isdigit()]
+        from pmp_autocheck_batch import run as run_batch
+        result=run_batch(ids)
+        byid={str(x.get('pigu_external_id') or ''):x for x in result.get('items') or []}
+        rows=[]; state_counts=Counter(); code_counts=Counter(); locale_counts=Counter()
+        for src in offers:
+            pid=str(src.get('pigu_external_id') or '').strip()
+            item=byid.get(pid)
+            codes=[]; locales=[]
+            def walk(obj,loc=''):
+                if isinstance(obj,dict):
+                    code=str(obj.get('code') or '').strip()
+                    if code:
+                        codes.append(code)
+                        if loc: locales.append(loc)
+                    for k,v in obj.items():
+                        if k in ('lt','lv','ee','fi','ru'): walk(v,k)
+                        elif k not in ('code','updated_at','validator_id','words'): walk(v,loc)
+                elif isinstance(obj,list):
+                    for v in obj: walk(v,loc)
+            if item and item.get('http')==200:
+                walk(item.get('errors') or [])
+                state='VERIFIED_EXISTING' if not codes else 'EXISTING_WITH_ERRORS'
+            else:
+                state='AUTOCHECK_UNAVAILABLE'
+            state_counts[state]+=1
+            for c in set(codes): code_counts[c]+=1
+            for loc in set(locales): locale_counts[loc]+=1
+            rows.append({**src,'phh_autocheck_state':state,
+                         'phh_autocheck_errors':'|'.join(sorted(set(codes))),
+                         'phh_autocheck_locales':'|'.join(sorted(set(locales))),
+                         'writes':'0'})
+        summary={'status':result.get('status'),'checked':len(rows),'status_counts':dict(state_counts),
+                 'error_code_card_counts':dict(code_counts),'error_locale_card_counts':dict(locale_counts),
+                 'http_counts':result.get('http_counts') or {},'phh_writes':0}
+        saved,err=_persist_existing_autocheck(summary,rows)
+        summary['persisted']=saved; summary['persistence_error']=err
+        with EXISTING_AUTOCHECK_LOCK:
+            EXISTING_AUTOCHECK.update(status='ok',error=None,summary=summary,rows=rows,
+                                      csv=_existing_autocheck_csv(rows),last_refresh=time.time())
+        print('EXISTING_CATALOG_AUTOCHECK_RESULT',json.dumps(summary,sort_keys=True),flush=True)
+    except Exception as e:
+        with EXISTING_AUTOCHECK_LOCK:
+            EXISTING_AUTOCHECK.update(status='error',error=f'{type(e).__name__}: {str(e)[:250]}')
+        print('EXISTING_CATALOG_AUTOCHECK_FAILED',type(e).__name__,str(e)[:250],flush=True)
+
+
+@app.get('/phh/existing-catalog-autocheck')
+def existing_catalog_autocheck_status():
+    with EXISTING_AUTOCHECK_LOCK:
+        return _json({'status':EXISTING_AUTOCHECK.get('status'),
+                      'error':EXISTING_AUTOCHECK.get('error'),
+                      'summary':EXISTING_AUTOCHECK.get('summary') or {},
+                      'last_refresh':EXISTING_AUTOCHECK.get('last_refresh')})
+
+@app.post('/phh/existing-catalog-autocheck')
+def existing_catalog_autocheck_start():
+    with EXISTING_AUTOCHECK_LOCK:
+        if EXISTING_AUTOCHECK.get('status')=='running':
+            return _json({'status':'ALREADY_RUNNING','phh_writes':0},202)
+    threading.Thread(target=_run_existing_catalog_autocheck,daemon=True,name='phh-existing-autocheck').start()
+    return _json({'status':'STARTED_READ_ONLY','phh_writes':0},202)
+
 @app.get('/full-catalog/refresh')
 def full_catalog_refresh_status():
     with FULL_CATALOG_LOCK:
@@ -390,8 +519,15 @@ def _full_catalog_artifact(name,mime):
     if not b: return _json({'error':'full catalog audit artifact unavailable','status':status,'detail':err},503)
     return Response(b,status=200,mimetype=mime,headers={'Cache-Control':'no-store'})
 
-@app.get('/full-catalog/all-existing-autocheck.csv')
-def full_catalog_all_existing_autocheck(): return _full_catalog_artifact('all-existing-autocheck.csv','text/csv')
+@app.get('/full-catalog/all-existing-offers.csv')
+def full_catalog_all_existing_offers(): return _full_catalog_artifact('all-existing-offers.csv','text/csv')
+
+@app.get('/phh/existing-catalog-autocheck.csv')
+def existing_catalog_autocheck_csv():
+    with EXISTING_AUTOCHECK_LOCK:
+        b=EXISTING_AUTOCHECK.get('csv'); status=EXISTING_AUTOCHECK.get('status'); err=EXISTING_AUTOCHECK.get('error')
+    if not b: return _json({'error':'existing autocheck artifact unavailable','status':status,'detail':err},503)
+    return Response(b,status=200,mimetype='text/csv',headers={'Cache-Control':'no-store'})
 
 @app.get('/full-catalog/existing-autocheck-remediation.csv')
 def full_catalog_existing_autocheck_remediation(): return _full_catalog_artifact('existing-autocheck-remediation.csv','text/csv')
@@ -888,6 +1024,7 @@ def _boot():
         print('OUTFISH_CATALOG_GATE_SELFTEST_ERROR',type(e).__name__,flush=True)
         return
     restored=_restore_full_catalog()
+    _restore_existing_autocheck()
     _restore_latest()
     print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in
           ('GOOGLE_SERVICE_ACCOUNT_JSON','SHOPIFY_CLIENT_ID','SHOPIFY_CLIENT_SECRET','DATABASE_URL')},
