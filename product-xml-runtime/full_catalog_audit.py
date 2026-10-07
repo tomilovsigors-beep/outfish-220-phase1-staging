@@ -1,5 +1,5 @@
 from __future__ import annotations
-import csv, io, json, os, time
+import csv, io, json, os, time, re
 from collections import Counter, defaultdict
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -46,8 +46,45 @@ def _shopify_all_variants():
         if pages>10000: raise RuntimeError('Shopify pagination safety limit exceeded')
     return rows,pages
 
+def _phh_description(title,body):
+    title=_norm(title); body=_norm(body)
+    if not title or not body: return ''
+    # Remove one existing leading H2; PHH requires its own exact title H2 prefix.
+    body=re.sub(r'^\\s*<h2\\b[^>]*>.*?</h2>\\s*','',body,count=1,flags=re.I|re.S)
+    return '<h2>'+title+'</h2><p><br></p>'+body
+
+def _shopify_translation_index():
+    token=_shopify_token(); shop=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
+    url=f'https://{shop}/admin/api/{API_VERSION}/graphql.json'
+    query='''query TranslationCoverage($after:String){translatableResources(resourceType:PRODUCT,first:250,after:$after){pageInfo{hasNextPage endCursor} nodes{resourceId lt:translations(locale:"lt"){key value outdated} lv:translations(locale:"lv"){key value outdated} et:translations(locale:"et"){key value outdated} ru:translations(locale:"ru"){key value outdated} fi:translations(locale:"fi"){key value outdated}}}}'''
+    out={}; after=None; pages=0; source_counts=Counter()
+    while True:
+        r=requests.post(url,headers={'X-Shopify-Access-Token':token,'Content-Type':'application/json'},
+                        json={'query':query,'variables':{'after':after}},timeout=90)
+        r.raise_for_status(); p=r.json()
+        if p.get('errors'): raise RuntimeError('Shopify translation GraphQL errors: '+json.dumps(p['errors'])[:1000])
+        conn=((p.get('data') or {}).get('translatableResources') or {})
+        for node in conn.get('nodes') or []:
+            locout={}
+            for api_loc,out_loc in (('lt','lt'),('lv','lv'),('et','ee'),('ru','ru'),('fi','fi')):
+                arr=node.get(api_loc) or []
+                title=next((x for x in arr if x.get('key')=='title' and _norm(x.get('value')) and not x.get('outdated')),None)
+                body=next((x for x in arr if x.get('key')=='body_html' and _norm(x.get('value')) and not x.get('outdated')),None)
+                if title and body:
+                    locout[out_loc]={'title':_norm(title.get('value')),
+                                     'description_html':_phh_description(title.get('value'),body.get('value')),
+                                     'source':'SHOPIFY_TRANSLATION_FRESH'}
+                    source_counts['FRESH_'+out_loc.upper()]+=1
+            out[_norm(node.get('resourceId'))]=locout
+        pages+=1
+        pi=conn.get('pageInfo') or {}
+        if not pi.get('hasNextPage'): break
+        after=pi.get('endCursor')
+        if not after or pages>50: break
+    return out,pages,dict(source_counts)
+
 def run():
-    started=time.time(); master=_master_rows(); variants,pages=_shopify_all_variants()
+    started=time.time(); master=_master_rows(); variants,pages=_shopify_all_variants(); translations,translation_pages,translation_source_counts=_shopify_translation_index()
     master_by_vid=defaultdict(list); master_by_sku=defaultdict(list); master_by_ean=defaultdict(list)
     for i,m in enumerate(master,2):
         vid=_norm(m.get('shopify_variant_id')); sku=_norm(m.get('220_sku') or m.get('shopify_sku')); ean=_norm(m.get('220_ean') or m.get('shopify_barcode'))
@@ -254,6 +291,7 @@ def run():
                                        for r in exact_category_rule_rows
                                        if r.get('status')=='AUTO_EXACT_LEAF')
     pipeline_inputs=[]
+    translation_queue=[]
     for v in variants:
         sku=_norm(v.get('shopify_sku')); barcode=_norm(v.get('shopify_barcode'))
         vid=_norm(v.get('shopify_variant_id'))
@@ -308,12 +346,28 @@ def run():
         else:
             phh_identity={'status':'UNKNOWN'}
         locs={}
+        product_translations=translations.get(_norm(v.get('shopify_product_id'))) or {}
+        missing_translation_targets=[]
         for loc in ('lt','lv','ee','ru','fi'):
-            locs[loc]={
-                'title':m.get('220_title_'+loc),
-                'description_html':m.get('220_description_'+loc+'_html'),
-                'supplier_code':m.get('220_supplier_code_'+loc)
-            }
+            master_title=_norm(m.get('220_title_'+loc))
+            master_body=_norm(m.get('220_description_'+loc+'_html'))
+            if master_title and master_body:
+                locs[loc]={'title':master_title,
+                           'description_html':_phh_description(master_title,master_body),
+                           'supplier_code':sku,'source':'MASTER'}
+            elif product_translations.get(loc):
+                locs[loc]={**product_translations[loc],'supplier_code':sku}
+            else:
+                locs[loc]={'title':'','description_html':'','supplier_code':sku,'source':'MISSING'}
+                missing_translation_targets.append(loc)
+        if missing_translation_targets and not is_fhm:
+            translation_queue.append({
+                'shopify_product_id':_norm(v.get('shopify_product_id')),
+                'shopify_variant_id':vid,'sku':sku,'vendor':_norm(v.get('vendor')),
+                'shopify_title':_norm(v.get('shopify_title')),
+                'targets':'|'.join(missing_translation_targets),
+                'preferred_source':'lv' if product_translations.get('lv') else ('ru' if product_translations.get('ru') else 'SHOPIFY_BASE'),
+                'writes':'0'})
         images=[]
         image_url=_norm(m.get('220_main_image_url') or v.get('featured_image_url'))
         if image_url:
@@ -420,6 +474,12 @@ def run():
     summary['source_quality']={'barcode_non_fhm':dict(barcode_profile),
               'live_price_non_fhm':dict(price_profile),
               'locale_coverage_non_fhm':dict(locale_profile)}
+    summary['translation_evidence']={
+        'shopify_translation_pages':translation_pages,
+        'fresh_title_body_by_locale':translation_source_counts,
+        'translation_queue_variants':len(translation_queue),
+        'master_or_shopify_sources_only':True,
+        'translation_writes':0}
     summary['category_evidence']={
         'source':'v4_exact_identity_plus_unique_exact_shopify_phh_leaf',
         'artifact_status':category_artifact_status,
@@ -443,6 +503,7 @@ def run():
         'catalog-pipeline-state.json':_json({'summary':pipeline_report,'rows':pipeline_rows}),
         'catalog-category-backlog.csv':_csv(backlog_rows,['shopify_category_id','shopify_category_name','variants','mapped_v4','unmapped_or_review']),
         'catalog-category-rules.csv':_csv(exact_category_rule_rows,['shopify_category_id','shopify_category_name','shopify_terminal','variant_count','vendor_count','phh_category_id','phh_category_title','status','confidence','basis','phh_write']),
+        'catalog-translation-queue.csv':_csv(translation_queue,['shopify_product_id','shopify_variant_id','sku','vendor','shopify_title','targets','preferred_source','writes']),
         'full-catalog-ready-candidates.csv':_csv(ready,ready_fields),
         'full-catalog-exceptions.csv':_csv(exc,exc_fields)
     },summary
