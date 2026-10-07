@@ -302,7 +302,9 @@ def run():
         '433':{'ui_category':'Teltis','api_required_count':17,'ui_required_product_feature_count':0,
                'evidence':'AUTHENTICATED_SELLER_UI_READONLY'},
         '434':{'ui_category':'Guļammaisi','api_required_count':13,'ui_required_product_feature_count':0,
-               'evidence':'AUTHENTICATED_SELLER_UI_DOM_READONLY'}
+               'evidence':'AUTHENTICATED_SELLER_UI_DOM_READONLY'},
+        '20523':{'ui_category':'Zeķubikses','api_required_count':9,'ui_required_product_feature_count':0,
+                 'evidence':'AUTHENTICATED_SELLER_UI_READONLY'}
     }
     contract_conflict_counts=Counter()
     content_image_index={}
