@@ -412,6 +412,14 @@ def existing_catalog_autocheck_status():
                       'summary':EXISTING_AUTOCHECK.get('summary') or {},
                       'last_refresh':EXISTING_AUTOCHECK.get('last_refresh')})
 
+@app.get('/phh/existing-catalog-autocheck/start')
+def existing_catalog_autocheck_start_get():
+    with EXISTING_AUTOCHECK_LOCK:
+        if EXISTING_AUTOCHECK.get('status')=='running':
+            return _json({'status':'ALREADY_RUNNING','phh_writes':0},202)
+    threading.Thread(target=_run_existing_catalog_autocheck,daemon=True,name='phh-existing-autocheck').start()
+    return _json({'status':'STARTED_READ_ONLY','phh_writes':0},202)
+
 @app.post('/phh/existing-catalog-autocheck')
 def existing_catalog_autocheck_start():
     with EXISTING_AUTOCHECK_LOCK:
