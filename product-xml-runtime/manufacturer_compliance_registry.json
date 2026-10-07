@@ -299,10 +299,10 @@
         "address": "Hornstein 7, 82544 Egling, Germany",
         "email": "cm@brandoutdoor.de",
         "country": "DE",
-        "status": "DISTRIBUTOR_VERIFIED_RESPONSIBLE_PERSON_ROLE_PENDING",
-        "source_url": "https://sotooutdoors.eu/en/contact/"
+        "status": "VERIFIED",
+        "source_url": "https://www.nordisches-handwerk.de/outdoor-ausruestung/zeltoefen-outdoorkueche/toepfe-kannen-kessel/kessel-kaffeezubereitung/SW12876/soto-helix-coffee-maker"
       },
-      "phh_status": "MANUFACTURER_VERIFIED_EU_OPERATOR_ROLE_PENDING"
+      "phh_status": "MANUFACTURER_AND_EU_RESPONSIBLE_PERSON_VERIFIED"
     },
     {
       "vendor_group": "Nalgene",
