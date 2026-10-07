@@ -463,8 +463,21 @@ def existing_catalog_autocheck_manufacturer_groups():
         if pid and pid not in bucket['pigu_external_ids'] and len(bucket['pigu_external_ids'])<8:
             bucket['pigu_external_ids'].append(pid)
     grouped=sorted(groups.values(),key=lambda x:(-x['count'],x['vendor'].lower()))
+    title_prefix_counts=Counter()
+    fhm_title_count=0
+    compact_rows=[]
+    for row in rows:
+        title=str(row.get('shopify_title') or row.get('220_title') or '').strip()
+        prefix=(title.split()[0] if title else '(blank)')
+        title_prefix_counts[prefix]+=1
+        if 'FHM' in title.upper().split():
+            fhm_title_count+=1
+        compact_rows.append({k:row.get(k) for k in ('shopify_variant_id','shopify_sku','shopify_barcode','shopify_title','variant_title','product_type','pigu_external_id','offer_id','modification_id')})
+    compact=str(request.args.get('compact') or '').strip()=='1'
     return _json({'status':status,'error':error,'code':code,'vendor_filter':vendor_filter or None,'count':len(rows),
-                  'group_count':len(grouped),'groups':grouped,'rows':rows,
+                  'group_count':len(grouped),'groups':grouped,
+                  'title_prefix_counts':dict(title_prefix_counts),'fhm_title_count':fhm_title_count,
+                  'rows':compact_rows if compact else rows,
                   'last_refresh':last_refresh,'phh_writes':0})
 
 @app.get('/phh/existing-catalog-autocheck/start')
