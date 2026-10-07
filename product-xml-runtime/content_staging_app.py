@@ -390,6 +390,15 @@ def _full_catalog_artifact(name,mime):
     if not b: return _json({'error':'full catalog audit artifact unavailable','status':status,'detail':err},503)
     return Response(b,status=200,mimetype=mime,headers={'Cache-Control':'no-store'})
 
+@app.get('/full-catalog/all-existing-autocheck.csv')
+def full_catalog_all_existing_autocheck(): return _full_catalog_artifact('all-existing-autocheck.csv','text/csv')
+
+@app.get('/full-catalog/existing-autocheck-remediation.csv')
+def full_catalog_existing_autocheck_remediation(): return _full_catalog_artifact('existing-autocheck-remediation.csv','text/csv')
+
+@app.get('/full-catalog/stock-sync-review.csv')
+def full_catalog_stock_sync_review(): return _full_catalog_artifact('stock-sync-review.csv','text/csv')
+
 @app.get('/full-catalog/near-ready-cohort.csv')
 def full_catalog_near_ready_cohort(): return _full_catalog_artifact('near-ready-cohort.csv','text/csv')
 @app.get('/full-catalog/translation-queue.csv')
