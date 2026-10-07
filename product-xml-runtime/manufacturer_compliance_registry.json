@@ -307,16 +307,22 @@
     {
       "vendor_group": "Nalgene",
       "manufacturer": {
-        "name": "Nalge Nunc International Corporation, Outdoor Products Division",
+        "name": "Nalge Nunc International Corporation",
         "address": "75 Panorama Creek Drive, Rochester, NY 14625, USA",
+        "email": "nnics@thermo.com",
         "country": "US",
         "status": "VERIFIED",
-        "source_url": "https://nalgene.com/contact/"
+        "source_url": "https://www.relags.de/en/Nalgene-Narrow-mouth-bottles/076015/4021504200181"
       },
       "eu_responsible_person": {
-        "status": "UNVERIFIED_FOR_CONSUMER_BOTTLES"
+        "name": "Thermo Electron LED GmbH",
+        "address": "Robert-Bosch-Straße 1, 63505 Langenselbold, Germany",
+        "email": "nnics@thermo.com",
+        "country": "DE",
+        "status": "VERIFIED",
+        "source_url": "https://www.relags.de/en/Nalgene-Narrow-mouth-bottles/076015/4021504200181"
       },
-      "phh_status": "BLOCKED_EU_RESPONSIBLE_PERSON"
+      "phh_status": "MANUFACTURER_AND_EU_RESPONSIBLE_PERSON_VERIFIED"
     },
     {
       "vendor_group": "Feelfree",
@@ -329,9 +335,18 @@
         "source_url": "https://feelfreeus.com/blogs/news-1/superfish-press-release"
       },
       "eu_responsible_person": {
-        "status": "UNVERIFIED"
+        "name": "FeelFree Kayak EU Sp. z o.o.",
+        "address": "Armii Krajowej 1, 83-330 Żukowo, Poland",
+        "email": "shop@feelfreekayak.eu",
+        "country": "PL",
+        "status": "VERIFIED_PRODUCT_FAMILY",
+        "source_url": "https://feelfreekayak.eu/content/terms-and-conditions-of-use-3",
+        "evidence_urls": [
+          "https://www.otto.de/p/feel-free-einerkajak-feelfree-angelzubehoer-behaelter-fuer-8-runde-lucke-tackle-tray-S0NFH0VB/",
+          "https://feelfreekayak.eu/"
+        ]
       },
-      "phh_status": "BLOCKED_EU_RESPONSIBLE_PERSON"
+      "phh_status": "MANUFACTURER_AND_EU_RESPONSIBLE_PERSON_VERIFIED"
     },
     {
       "vendor_group": "BBQ",
