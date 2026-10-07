@@ -15,7 +15,7 @@ def run(ids):
         x=str(raw or "").strip()
         if x.isdigit() and x not in seen:
             seen.add(x); clean.append(x)
-    clean=clean[:100]
+    clean=clean[:500]
     if not clean:
         return {"status":"ERROR","error":"NO_IDS","writes":0,"items":[]}
     lr=_api_login("v3"); lr.raise_for_status()
@@ -28,7 +28,7 @@ def run(ids):
         except Exception: body={"raw":r.text[:1200]}
         return pid,r.status_code,body
     items=[]; http=Counter(); error_kinds=Counter()
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with ThreadPoolExecutor(max_workers=5) as pool:
         futs={pool.submit(one,p):p for p in clean}
         for f in as_completed(futs):
             pid=futs[f]
