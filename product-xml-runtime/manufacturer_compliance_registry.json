@@ -67,16 +67,18 @@
         "name": "Gear Aid Inc.",
         "address": "1411 Meador Ave, Bellingham, WA 98229, USA",
         "country": "US",
-        "status": "PARTIAL_VERIFIED",
+        "status": "VERIFIED",
         "source_url": "https://www.gearaid.com/pages/contact-us"
       },
       "eu_responsible_person": {
-        "name": "McNett Europe GmbH",
+        "name": "GEAR AID Europe GmbH",
+        "address": "Kirchplatz 5, 29664 Walsrode, Germany",
+        "email": "info@gearaid.eu",
         "country": "DE",
-        "status": "PARTIAL_VERIFIED_ADDRESS_REQUIRED",
-        "source_url": "https://www.gearaid.com/blogs/learn/gear-aid-inc-acquires-heroclip"
+        "status": "VERIFIED",
+        "source_url": "https://gearaid.eu/pages/impress-impressum"
       },
-      "phh_status": "BLOCKED_EU_RESPONSIBLE_PERSON_ADDRESS"
+      "phh_status": "MANUFACTURER_AND_EU_RESPONSIBLE_PERSON_VERIFIED"
     },
     {
       "vendor_group": "Outfish",
@@ -90,9 +92,26 @@
         "source_url": "https://outfish.lv/pages/contact-us"
       },
       "manufacturer": {
-        "status": "NOT_INFERRED_FROM_BRAND_OWNER"
+        "name": "Outfish SIA",
+        "address": "Cēsu iela 18, Rīga, Latvija",
+        "email": "info@outfish.lv",
+        "country": "LV",
+        "status": "VERIFIED_FOR_OUTFISH_BRANDED_PRODUCTS",
+        "source_url": "https://outfish.lv/pages/contact-us",
+        "evidence_urls": [
+          "https://outfish.lv/en/products/neoprene-cuffs-for-fishing-jacket",
+          "https://outfish.lv/en/products/waterproof-socks-outfish-black",
+          "https://eur-lex.europa.eu/legal-content/EN/ALL/?uri=oj:JOL_2023_135_R_0001"
+        ],
+        "scope_rule": "Apply only where live Shopify product is explicitly marketed under Outfish name/trademark; do not apply to generic/non-Outfish titles solely because vendor=Outfish."
       },
-      "phh_status": "PRODUCT_MODEL_MANUFACTURER_VERIFICATION_REQUIRED"
+      "phh_status": "PARTIAL_COHORT_OUTFISH_BRANDED_READY",
+      "eu_responsible_person": {
+        "status": "MANUFACTURER_ITSELF_BY_GPSR",
+        "name": "Outfish SIA",
+        "address": "Cēsu iela 18, Rīga, Latvija",
+        "email": "info@outfish.lv"
+      }
     },
     {
       "vendor_group": "Humtto",
