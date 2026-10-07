@@ -214,6 +214,27 @@ def readiness(): return _artifact('product-xml-readiness.csv','text/csv')
 def xml_blockers(): return _artifact('product-xml-blockers.csv','text/csv')
 @app.get('/product-xml-dry-run.xml')
 def xml(): return _artifact('product-xml-dry-run.xml','application/xml')
+@app.get('/phh/category-contract.json')
+def phh_category_contract():
+    raw=request.args.get('ids','').strip()
+    ids=[x.strip() for x in raw.split(',') if x.strip().isdigit()][:50]
+    if not ids: return _json({'status':'ERROR','error':'ids query param required'},400)
+    import current_product_category_audit as _cat
+    summary,cats,attrs=_cat._latest_taxonomy(os.getenv('DATABASE_URL',''))
+    by={str(c.get('category_id')):c for c in cats}
+    out=[]
+    for cid in ids:
+        c=by.get(cid) or {}
+        req=[{k:a.get(k,'') for k in ('field_id','required','title_en','title_lt','title_lv','title_ee','title_fi','title_ru')}
+             for a in attrs
+             if str(a.get('category_id'))==cid and str(a.get('required')).casefold() in {'true','1','yes'}]
+        out.append({'category_id':cid,
+                    'exists':bool(c),
+                    'allow_add_products':c.get('allow_add_products'),
+                    'title_en':c.get('title_en'),'title_lt':c.get('title_lt'),'title_lv':c.get('title_lv'),
+                    'required_fields':req,'required_count':len(req)})
+    return _json({'status':'PASS','taxonomy_summary':summary,'categories':out,'writes':0})
+
 @app.get('/pmp-openapi-digest.json')
 def pmp_openapi_digest():
     from pmp_openapi_digest import run
