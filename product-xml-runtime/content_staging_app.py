@@ -444,6 +444,84 @@ def phh_manufacturer_openapi():
     except Exception as e:
         return _json({'status':'ERROR','error':f'{type(e).__name__}: {str(e)[:300]}','writes':0},500)
 
+@app.get('/phh/existing-catalog-autocheck/scope-summary.json')
+def existing_catalog_autocheck_scope_summary():
+    from collections import Counter
+    with EXISTING_AUTOCHECK_LOCK:
+        status=EXISTING_AUTOCHECK.get('status')
+        error=EXISTING_AUTOCHECK.get('error')
+        rows=[dict(x) for x in (EXISTING_AUTOCHECK.get('rows') or [])]
+        last_refresh=EXISTING_AUTOCHECK.get('last_refresh')
+    if not rows:
+        return _json({'status':status,'error':error,'count':0,'last_refresh':last_refresh,'phh_writes':0})
+    try:
+        from app import _shopify_token
+        token=_shopify_token()
+        shop=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
+        ids=sorted({str(r.get('shopify_variant_id') or '').strip() for r in rows if str(r.get('shopify_variant_id') or '').strip()})
+        query='''query ScopeVariants($ids:[ID!]!){nodes(ids:$ids){... on ProductVariant{id sku product{id title handle vendor productType status tags}}}}'''
+        live={}
+        for i in range(0,len(ids),50):
+            batch=ids[i:i+50]
+            resp=requests.post(f'https://{shop}/admin/api/2026-07/graphql.json',
+                headers={'X-Shopify-Access-Token':token,'Content-Type':'application/json'},
+                json={'query':query,'variables':{'ids':batch}},timeout=90)
+            resp.raise_for_status()
+            payload=resp.json()
+            if payload.get('errors'):
+                raise RuntimeError('Shopify GraphQL errors: '+json.dumps(payload['errors'])[:1200])
+            for node in ((payload.get('data') or {}).get('nodes') or []):
+                if node and node.get('id'):
+                    live[str(node['id'])]=node
+        excluded=[]
+        included=[]
+        excluded_reasons=Counter()
+        included_error_counts=Counter()
+        excluded_error_counts=Counter()
+        for row in rows:
+            node=live.get(str(row.get('shopify_variant_id') or '').strip()) or {}
+            p=node.get('product') or {}
+            title=str(p.get('title') or row.get('shopify_title') or '').strip()
+            handle=str(p.get('handle') or '').strip()
+            ptype=str(p.get('productType') or row.get('product_type') or '').strip()
+            tags=[str(x) for x in (p.get('tags') or [])]
+            hay=' '.join([title,handle,ptype]+tags).casefold()
+            reason=None
+            if any(x in hay for x in ('gift card','giftcard','dāvanu karte','davanu karte','gift certificate','voucher')):
+                reason='GIFT_CARD'
+            else:
+                rental_terms=(' rental','rental ',' rent ',' noma','nomā',' īre','īre ','hire ')
+                if any(x in (' '+hay+' ') for x in rental_terms):
+                    reason='RENTAL'
+            if not reason:
+                ptype_cf=ptype.casefold().strip()
+                tag_cf={x.casefold().strip() for x in tags}
+                title_cf=title.casefold()
+                direct_kayak=(ptype_cf in {'kayak','kayaks','kajaks','kajaki','kajak'} or bool(tag_cf & {'kayak','kayaks','kajaks','kajaki','kajak'}))
+                title_kayak=('kayak' in title_cf or 'kajak' in title_cf)
+                accessory_terms=('holder','mount','rack','bracket','paddle holder','accessory','accessories','rail mount')
+                title_accessory=any(x in title_cf for x in accessory_terms)
+                if direct_kayak or (title_kayak and not title_accessory):
+                    reason='KAYAK'
+            codes=[x for x in str(row.get('phh_autocheck_errors') or '').split('|') if x]
+            item={'shopify_variant_id':row.get('shopify_variant_id'),'pigu_external_id':row.get('pigu_external_id'),
+                  'title':title,'handle':handle,'vendor':p.get('vendor') or row.get('vendor'),
+                  'product_type':ptype,'status':p.get('status'),'reason':reason,'errors':codes}
+            if reason:
+                excluded.append(item); excluded_reasons[reason]+=1
+                for c in set(codes): excluded_error_counts[c]+=1
+            else:
+                included.append(item)
+                for c in set(codes): included_error_counts[c]+=1
+        return _json({'status':status,'error':error,'snapshot_count':len(rows),
+            'live_resolved':len(live),'included_count':len(included),'excluded_count':len(excluded),
+            'excluded_reasons':dict(excluded_reasons),
+            'included_error_code_card_counts':dict(included_error_counts),
+            'excluded_error_code_card_counts':dict(excluded_error_counts),
+            'excluded_rows':excluded,'last_refresh':last_refresh,'phh_writes':0,'shopify_writes':0})
+    except Exception as e:
+        return _json({'status':'LIVE_SCOPE_JOIN_FAILED','error':f'{type(e).__name__}: {str(e)[:300]}','phh_writes':0,'shopify_writes':0},502)
+
 @app.get('/phh/existing-catalog-autocheck/manufacturer-groups.json')
 def existing_catalog_autocheck_manufacturer_groups():
     from collections import Counter
