@@ -43,12 +43,21 @@ def run(ids):
                             errors=body[key]; break
                     if not errors and body:
                         errors=[body]
+                def collect_codes(obj):
+                    found=[]
+                    if isinstance(obj,dict):
+                        if obj.get("code"): found.append(str(obj.get("code")))
+                        for v in obj.values(): found.extend(collect_codes(v))
+                    elif isinstance(obj,list):
+                        for v in obj: found.extend(collect_codes(v))
+                    return found
                 for e in errors:
-                    if isinstance(e,dict):
-                        label=str(e.get("validator") or e.get("code") or e.get("type") or e.get("message") or "UNKNOWN")
-                    else:
-                        label=str(e)
-                    error_kinds[label[:180]]+=1
+                    codes=collect_codes(e)
+                    if not codes:
+                        codes=[str(e.get("validator") or e.get("type") or e.get("message") or "UNKNOWN")
+                               if isinstance(e,dict) else str(e)]
+                    for label in codes:
+                        error_kinds[label[:180]]+=1
                 items.append({"pigu_external_id":p,"http":status,"error_count":len(errors),"errors":errors})
             except Exception as e:
                 http["EXCEPTION"]+=1
