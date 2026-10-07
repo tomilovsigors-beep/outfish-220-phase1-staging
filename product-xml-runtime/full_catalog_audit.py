@@ -94,8 +94,9 @@ def run():
         if vid: master_by_vid[vid].append((i,m))
         if sku: master_by_sku[sku].append((i,m))
         if ean: master_by_ean[ean].append((i,m))
+    from master_variant_identity import gtin13 as canonical_gtin13
     shop_skus=Counter(_norm(v['shopify_sku']) for v in variants if _norm(v['shopify_sku']))
-    shop_eans=Counter(_norm(v['shopify_barcode']) for v in variants if _norm(v['shopify_barcode']))
+    shop_eans=Counter(canonical_gtin13(v['shopify_barcode']) for v in variants if canonical_gtin13(v['shopify_barcode']))
     rec=[]; prelim=[]; ready=[]; exc=[]; matched_master_rows=set(); counts=Counter()
     for v in variants:
         vid=v['shopify_variant_id']; sku=v['shopify_sku']; ean=v['shopify_barcode']; reasons=[]; candidates=[]
@@ -106,7 +107,7 @@ def run():
             candidates=[(r,m) for (r,_),m in unique.items()]
             match_basis='SKU_EAN_FALLBACK'
         if shop_skus.get(sku,0)>1 and sku: reasons.append('DUPLICATE_SHOPIFY_SKU')
-        if shop_eans.get(ean,0)>1 and ean: reasons.append('DUPLICATE_SHOPIFY_EAN')
+        if canonical_gtin13(ean) and shop_eans.get(canonical_gtin13(ean),0)>1: reasons.append('DUPLICATE_SHOPIFY_EAN')
         if not sku: reasons.append('MISSING_SHOPIFY_SKU')
         if not ean: reasons.append('MISSING_SHOPIFY_EAN')
         if len(candidates)==0: status='NEW'
@@ -301,6 +302,8 @@ def run():
     except Exception as e:
         content_image_summary={'status':'ERROR_'+type(e).__name__,'writes':0}
     content_image_live=Counter()
+    readiness_funnel=Counter()
+    readiness_by_category=defaultdict(Counter)
     pipeline_inputs=[]
     translation_queue=[]
     for v in variants:
@@ -384,6 +387,27 @@ def run():
             content_image_live['EXACT_CONTENT_IMAGE_IDENTITY']+=1
             if image_ev.get('two_images_verified'): content_image_live['TWO_IMAGES_600_DIRECT']+=1
             if image_ev.get('main_neutral_verified'): content_image_live['MAIN_NEUTRAL_VERIFIED']+=1
+
+        # Progressive preparation funnel. This never authorizes PHH CREATE.
+        base_ok=False
+        if not is_fhm:
+            try: price_ok=float(v.get('shopify_price_live'))>=10
+            except (TypeError,ValueError): price_ok=False
+            gtin=_ean13(barcode)
+            base_ok=bool(sku and gtin and shop_skus.get(sku)==1 and shop_eans.get(gtin)==1
+                         and v.get('shopify_status')=='ACTIVE' and price_ok)
+            if base_ok:
+                readiness_funnel['IDENTITY_PRICE_ACTIVE']+=1
+                readiness_by_category[_norm(v.get('shopify_category_name'))]['IDENTITY_PRICE_ACTIVE']+=1
+            if base_ok and category_confirmed:
+                readiness_funnel['+CATEGORY']+=1
+                readiness_by_category[_norm(v.get('shopify_category_name'))]['+CATEGORY']+=1
+            if base_ok and category_confirmed and image_ev and image_ev.get('two_images_verified'):
+                readiness_funnel['+TWO_IMAGES_600_DIRECT']+=1
+                readiness_by_category[_norm(v.get('shopify_category_name'))]['+TWO_IMAGES_600_DIRECT']+=1
+            if base_ok and category_confirmed and image_ev and image_ev.get('two_images_verified') and image_ev.get('main_neutral_verified'):
+                readiness_funnel['+MAIN_NEUTRAL']+=1
+                readiness_by_category[_norm(v.get('shopify_category_name'))]['+MAIN_NEUTRAL']+=1
         images=[]
         image_url=_norm(m.get('220_main_image_url') or v.get('featured_image_url'))
         if image_url:
@@ -392,7 +416,7 @@ def run():
         pipeline_inputs.append({
             'sku':sku,'barcode':barcode,'vendor':v.get('vendor'),
             'sku_unique':bool(sku and shop_skus[sku]==1),
-            'ean_unique':bool(barcode and shop_eans[barcode]==1),
+            'ean_unique':bool(_ean13(barcode) and shop_eans[_ean13(barcode)]==1),
             'shopify_active':v.get('shopify_status')=='ACTIVE',
             'price_eur':v.get('shopify_price_live'),
             'phh_identity':phh_identity,
@@ -490,6 +514,15 @@ def run():
     summary['source_quality']={'barcode_non_fhm':dict(barcode_profile),
               'live_price_non_fhm':dict(price_profile),
               'locale_coverage_non_fhm':dict(locale_profile)}
+    funnel_categories=[{'shopify_category_name':k,**dict(v)}
+                       for k,v in readiness_by_category.items() if v.get('IDENTITY_PRICE_ACTIVE')]
+    funnel_categories.sort(key=lambda x:(-x.get('+TWO_IMAGES_600_DIRECT',0),-x.get('+CATEGORY',0),-x.get('IDENTITY_PRICE_ACTIVE',0),x['shopify_category_name']))
+    summary['readiness_funnel']={
+        'counts':dict(readiness_funnel),
+        'top_categories':funnel_categories[:30],
+        'create_authorized':False,
+        'phh_identity_absence_required_later':True,
+        'writes':0}
     summary['image_evidence']={
         'snapshot':content_image_summary,
         'live_exact_identity_counts':dict(content_image_live),
