@@ -214,6 +214,11 @@ def readiness(): return _artifact('product-xml-readiness.csv','text/csv')
 def xml_blockers(): return _artifact('product-xml-blockers.csv','text/csv')
 @app.get('/product-xml-dry-run.xml')
 def xml(): return _artifact('product-xml-dry-run.xml','application/xml')
+@app.get('/pmp-openapi-digest.json')
+def pmp_openapi_digest():
+    from pmp_openapi_digest import run
+    return _json(run())
+
 @app.get('/pmp-api-discovery.json')
 def pmp_api_discovery():
     try:
