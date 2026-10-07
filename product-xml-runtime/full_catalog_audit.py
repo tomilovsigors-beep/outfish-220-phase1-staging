@@ -566,35 +566,97 @@ def run():
               'live_price_non_fhm':dict(price_profile),
               'locale_coverage_non_fhm':dict(locale_profile)}
     # PHH's own auto-check is the authoritative completeness signal for existing cards.
-    # Current verified batch: all 29 near-ready EXISTING pigu_external_ids checked read-only.
-    verified_existing_clean_ids={
-        '39241638','39241648','39241653','39241658','84144796','84144806','84144811','84144816',
-        '84145396','84145401','106261207','173765403','265105818','265414188','273857832','278865384',
-        '289949314','289952954','289954724','289991924'
-    }
-    existing_error_ids={
-        '31924606':'manufacturer_representative_info_missing',
-        '69307778':'manufacturer_representative_info_missing',
-        '73473018':'risky_words_found',
-        '87610799':'empty_fi_title_description',
-        '105943187':'mandatory_fields_missing',
-        '255641264':'mandatory_fields_missing+manufacturer_representative_info_missing',
-        '268794418':'manufacturer_representative_info_missing',
-        '289958234':'mandatory_fields_missing',
-        '289958394':'risky_words_found'
-    }
+    # Run dynamically for the current near-ready EXISTING cohort; GET-only, fail-closed.
+    autocheck_status='UNAVAILABLE'
+    autocheck_http_counts={}
+    autocheck_error_kinds={}
+    autocheck_by_id={}
+    existing_ids=[_norm(r.get('pigu_external_id')) for r in near_ready_rows
+                  if r.get('phh_identity_state')=='EXISTING' and _norm(r.get('pigu_external_id'))]
+    try:
+        from pmp_autocheck_batch import run as run_autocheck_batch
+        ac=run_autocheck_batch(existing_ids)
+        autocheck_status=ac.get('status','UNKNOWN')
+        autocheck_http_counts=ac.get('http_counts') or {}
+        autocheck_error_kinds=ac.get('error_kinds') or {}
+        autocheck_by_id={_norm(x.get('pigu_external_id')):x for x in (ac.get('items') or [])}
+    except Exception as e:
+        autocheck_status='ERROR_'+type(e).__name__
+    remediation_rows=[]
+    stock_sync_rows=[]
     for r in near_ready_rows:
         pid=_norm(r.get('pigu_external_id'))
-        if pid in verified_existing_clean_ids:
-            r['phh_autocheck_state']='VERIFIED_EXISTING'
-            r['phh_autocheck_errors']=''
-        elif pid in existing_error_ids:
-            r['phh_autocheck_state']='EXISTING_WITH_ERRORS'
-            r['phh_autocheck_errors']=existing_error_ids[pid]
+        item=autocheck_by_id.get(pid)
+        if r.get('phh_identity_state')=='EXISTING':
+            if item and item.get('http')==200 and int(item.get('error_count') or 0)==0:
+                r['phh_autocheck_state']='VERIFIED_EXISTING'
+                r['phh_autocheck_errors']=''
+            elif item and item.get('http')==200:
+                r['phh_autocheck_state']='EXISTING_WITH_ERRORS'
+                codes=Counter(); locales=Counter()
+                def walk_errors(obj,locale=''):
+                    if isinstance(obj,dict):
+                        code=_norm(obj.get('code'))
+                        if code:
+                            codes[code]+=1
+                            if locale: locales[locale]+=1
+                        for k,v in obj.items():
+                            if k in ('lt','lv','ee','fi','ru'):
+                                walk_errors(v,k)
+                            elif k not in ('code','updated_at','validator_id','words'):
+                                walk_errors(v,locale)
+                    elif isinstance(obj,list):
+                        for v in obj: walk_errors(v,locale)
+                walk_errors(item.get('errors') or [])
+                code_list=sorted(codes)
+                r['phh_autocheck_errors']='|'.join(code_list) or 'UNKNOWN'
+                if 'empty_title' in codes or 'empty_description' in codes:
+                    action='FIX_MISSING_LOCALIZED_CONTENT'
+                elif 'mandatory_fields_missing' in codes:
+                    action='PHH_CONTRACT_REVIEW'
+                elif 'manufacturer_representative_info_missing' in codes:
+                    action='NEEDS_VERIFIED_MANUFACTURER_REPRESENTATIVE_DATA'
+                elif 'risky_words_found' in codes:
+                    action='CONTENT_RISK_REVIEW'
+                else:
+                    action='REVIEW_PHH_AUTOCHECK'
+                if len(code_list)>1:
+                    action='MULTI_ISSUE_REVIEW'
+                remediation_rows.append({
+                    'sku':r.get('sku'),'pigu_external_id':pid,'offer_id':r.get('offer_id'),
+                    'phh_category_id':r.get('phh_category_id'),
+                    'error_codes':'|'.join(code_list),
+                    'locales':'|'.join(sorted(locales)),
+                    'recommended_action':action,
+                    'source':'PHH_AUTO_CHECK_GET',
+                    'writes':'0'
+                })
+            else:
+                r['phh_autocheck_state']='AUTOCHECK_UNAVAILABLE'
+                r['phh_autocheck_errors']=''
         else:
-            r['phh_autocheck_state']='NOT_CHECKED'
+            r['phh_autocheck_state']='NOT_APPLICABLE'
             r['phh_autocheck_errors']=''
-    near_ready_identity_counts=Counter(r.get('phh_identity_state') for r in near_ready_rows)
+
+        if r.get('phh_identity_state')=='EXISTING':
+            try:
+                shop_stock=int(float(r.get('shopify_stock_live')))
+                phh_stock=int(float(r.get('offer_amount')))
+                rule_target=0 if shop_stock==0 else max(3,shop_stock)
+                r['future_stock_rule_result']=rule_target
+                r['stock_match_rule_diagnostic']='YES' if phh_stock==rule_target else 'NO'
+                if phh_stock!=rule_target:
+                    source_state='BLOCKED_NEGATIVE_SHOPIFY_STOCK' if shop_stock<0 else 'REVIEW_REQUIRED'
+                    stock_sync_rows.append({
+                        'sku':r.get('sku'),'offer_id':r.get('offer_id'),
+                        'pigu_external_id':pid,'offer_status':r.get('offer_status'),
+                        'shopify_stock_live':shop_stock,'phh_stock_live':phh_stock,
+                        'rule_target':rule_target,'delta':rule_target-phh_stock,
+                        'source_state':source_state,'sync_authorized':'NO'
+                    })
+            except Exception:
+                r['stock_match_rule_diagnostic']='UNKNOWN'
+        near_ready_identity_counts=Counter(r.get('phh_identity_state') for r in near_ready_rows)
     near_ready_category_counts=Counter(r.get('phh_category_id') for r in near_ready_rows)
     near_ready_offer_status_counts=Counter(_norm(r.get('offer_status')).upper() or 'NO_OFFER' for r in near_ready_rows if r.get('phh_identity_state')=='EXISTING')
     existing_offer_health=Counter()
@@ -609,7 +671,12 @@ def run():
             existing_offer_health['STOCK_POSITIVE' if amt>0 else 'STOCK_ZERO']+=1
         except Exception:
             existing_offer_health['STOCK_UNKNOWN']+=1
-        if r.get('price_match_diagnostic')=='YES': existing_offer_health['PRICE_MATCH_SHOPIFY']+=1
+        try:
+            price_ok=abs(float(r.get('offer_price'))-float(r.get('price_eur')))<0.005
+        except Exception:
+            price_ok=False
+        r['price_match_diagnostic']='YES' if price_ok else 'NO'
+        if price_ok: existing_offer_health['PRICE_MATCH_SHOPIFY']+=1
         else: existing_offer_health['PRICE_DIFFERS_OR_FORMAT_UNKNOWN']+=1
     summary['near_ready_summary']={
         'variants':len(near_ready_rows),
@@ -618,9 +685,18 @@ def run():
         'offer_status_counts':dict(near_ready_offer_status_counts),
         'existing_offer_health':dict(existing_offer_health),
         'autocheck_summary':{
-            'checked':sum(1 for r in near_ready_rows if r.get('phh_autocheck_state')!='NOT_CHECKED'),
+            'status':autocheck_status,
+            'checked':sum(1 for r in near_ready_rows if r.get('phh_autocheck_state') in ('VERIFIED_EXISTING','EXISTING_WITH_ERRORS')),
             'verified_existing':sum(1 for r in near_ready_rows if r.get('phh_autocheck_state')=='VERIFIED_EXISTING'),
             'existing_with_errors':sum(1 for r in near_ready_rows if r.get('phh_autocheck_state')=='EXISTING_WITH_ERRORS'),
+            'http_counts':autocheck_http_counts,
+            'error_kinds':autocheck_error_kinds,
+            'writes':0
+        },
+        'stock_sync_review':{
+            'rows':len(stock_sync_rows),
+            'negative_shopify_stock_blocked':sum(1 for r in stock_sync_rows if r.get('source_state')=='BLOCKED_NEGATIVE_SHOPIFY_STOCK'),
+            'sync_authorized':False,
             'writes':0
         },
         'create_candidates_before_absence_proof':sum(1 for r in near_ready_rows if r.get('phh_identity_state')!='EXISTING'),
@@ -681,7 +757,9 @@ def run():
         'catalog-category-backlog.csv':_csv(backlog_rows,['shopify_category_id','shopify_category_name','variants','mapped_v4','unmapped_or_review']),
         'catalog-category-rules.csv':_csv(exact_category_rule_rows,['shopify_category_id','shopify_category_name','shopify_terminal','variant_count','vendor_count','phh_category_id','phh_category_title','status','confidence','basis','phh_write']),
         'catalog-translation-queue.csv':_csv(translation_queue,['shopify_product_id','shopify_variant_id','sku','vendor','shopify_title','targets','preferred_source','writes']),
-        'near-ready-cohort.csv':_csv(near_ready_rows,['shopify_variant_id','sku','ean','vendor','shopify_category_name','phh_category_id','category_basis','contract_conflict','two_images_600_direct','main_neutral_verified','master_basis','price_eur','phh_identity_state','offer_id','offer_status','offer_amount','offer_price','modification_id','pigu_external_id','shopify_stock_live','future_stock_rule_result','price_match_diagnostic','phh_autocheck_state','phh_autocheck_errors','phh_create_authorized']),
+        'near-ready-cohort.csv':_csv(near_ready_rows,['shopify_variant_id','sku','ean','vendor','shopify_category_name','phh_category_id','category_basis','contract_conflict','two_images_600_direct','main_neutral_verified','master_basis','price_eur','phh_identity_state','offer_id','offer_status','offer_amount','offer_price','modification_id','pigu_external_id','shopify_stock_live','future_stock_rule_result','price_match_diagnostic','stock_match_rule_diagnostic','phh_autocheck_state','phh_autocheck_errors','phh_create_authorized']),
+        'existing-autocheck-remediation.csv':_csv(remediation_rows,['sku','pigu_external_id','offer_id','phh_category_id','error_codes','locales','recommended_action','source','writes']),
+        'stock-sync-review.csv':_csv(stock_sync_rows,['sku','offer_id','pigu_external_id','offer_status','shopify_stock_live','phh_stock_live','rule_target','delta','source_state','sync_authorized']),
         'full-catalog-ready-candidates.csv':_csv(ready,ready_fields),
         'full-catalog-exceptions.csv':_csv(exc,exc_fields)
     },summary
