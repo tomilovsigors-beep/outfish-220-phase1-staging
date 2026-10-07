@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-10-07",
+  "policy": {
+    "eu_manufacturer": "Under GPSR, an EU-established manufacturer is itself the EU responsible person; do not invent a separate authorised representative.",
+    "non_eu_manufacturer": "Require an identified EU responsible economic operator before marking compliance ready.",
+    "phh_semantics": "PHH representative fields are nullable in OpenAPI; validator semantics remain unverified without seller UI or a write test."
+  },
+  "records": [
+    {
+      "vendor_group": "Fjord Nansen",
+      "manufacturer": {
+        "name": "SZANTI Dariusz Staniszewski",
+        "address": "ul. Szafirowa 1, 80-209 Chwaszczyno, Poland",
+        "email": "produkcja@fjordnansen.pl",
+        "country": "PL",
+        "status": "VERIFIED",
+        "source_url": "https://fjordnansen.pl/en/contact/"
+      },
+      "eu_responsible_person": {
+        "status": "MANUFACTURER_ITSELF_BY_GPSR",
+        "name": "SZANTI Dariusz Staniszewski",
+        "address": "ul. Szafirowa 1, 80-209 Chwaszczyno, Poland",
+        "email": "produkcja@fjordnansen.pl"
+      },
+      "phh_status": "MANUFACTURER_READY_REPRESENTATIVE_TECHNICAL_SEMANTICS_PENDING"
+    },
+    {
+      "vendor_group": "Grisport",
+      "manufacturer": {
+        "name": "GRISPORT SPA",
+        "address": "Via Erega 1, 31030 Castelcucco (TV), Italy",
+        "email": "info@grisport.it",
+        "country": "IT",
+        "status": "VERIFIED",
+        "source_url": "https://www.grisport.it/wp-content/uploads/2023/12/704803CD4g.pdf"
+      },
+      "eu_responsible_person": {
+        "status": "MANUFACTURER_ITSELF_BY_GPSR",
+        "name": "GRISPORT SPA",
+        "address": "Via Erega 1, 31030 Castelcucco (TV), Italy",
+        "email": "info@grisport.it"
+      },
+      "phh_status": "MANUFACTURER_READY_REPRESENTATIVE_TECHNICAL_SEMANTICS_PENDING"
+    },
+    {
+      "vendor_group": "Thermowave",
+      "manufacturer": {
+        "name": "UAB Termosportas",
+        "address": "Raudondvario pl. 101, LT-47184 Kaunas, Lithuania",
+        "email": "eshop@thermowave.com",
+        "country": "LT",
+        "status": "VERIFIED",
+        "source_url": "https://thermowave.com/pages/privacy-policy"
+      },
+      "eu_responsible_person": {
+        "status": "MANUFACTURER_ITSELF_BY_GPSR",
+        "name": "UAB Termosportas",
+        "address": "Raudondvario pl. 101, LT-47184 Kaunas, Lithuania",
+        "email": "eshop@thermowave.com"
+      },
+      "phh_status": "MANUFACTURER_READY_REPRESENTATIVE_TECHNICAL_SEMANTICS_PENDING"
+    },
+    {
+      "vendor_group": "GearAid",
+      "manufacturer": {
+        "name": "Gear Aid Inc.",
+        "address": "1411 Meador Ave, Bellingham, WA 98229, USA",
+        "country": "US",
+        "status": "PARTIAL_VERIFIED",
+        "source_url": "https://www.gearaid.com/pages/contact-us"
+      },
+      "eu_responsible_person": {
+        "name": "McNett Europe GmbH",
+        "country": "DE",
+        "status": "PARTIAL_VERIFIED_ADDRESS_REQUIRED",
+        "source_url": "https://www.gearaid.com/blogs/learn/gear-aid-inc-acquires-heroclip"
+      },
+      "phh_status": "BLOCKED_EU_RESPONSIBLE_PERSON_ADDRESS"
+    },
+    {
+      "vendor_group": "Outfish",
+      "brand_owner": {
+        "name": "Outfish SIA",
+        "registration_number": "40203243218",
+        "address": "Cēsu iela 18, Rīga, Latvija",
+        "email": "info@outfish.lv",
+        "country": "LV",
+        "status": "VERIFIED",
+        "source_url": "https://outfish.lv/pages/contact-us"
+      },
+      "manufacturer": {
+        "status": "NOT_INFERRED_FROM_BRAND_OWNER"
+      },
+      "phh_status": "PRODUCT_MODEL_MANUFACTURER_VERIFICATION_REQUIRED"
+    }
+  ]
+}
