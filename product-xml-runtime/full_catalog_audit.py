@@ -294,6 +294,17 @@ def run():
     category_rule_variant_coverage=sum(int(r.get('variant_count') or 0)
                                        for r in exact_category_rule_rows
                                        if r.get('status')=='AUTO_EXACT_LEAF')
+    # Authenticated seller-UI observations (2026-10-07, read-only).
+    # API taxonomy lists required product fields for these categories, while the
+    # selected category form renders none of those field IDs, including hidden DOM.
+    # Never resolve this by guessing: keep CREATE blocked under PHH_CONTRACT_CONFLICT.
+    ui_contract_conflicts={
+        '433':{'ui_category':'Teltis','api_required_count':17,'ui_required_product_feature_count':0,
+               'evidence':'AUTHENTICATED_SELLER_UI_READONLY'},
+        '434':{'ui_category':'Guļammaisi','api_required_count':13,'ui_required_product_feature_count':0,
+               'evidence':'AUTHENTICATED_SELLER_UI_DOM_READONLY'}
+    }
+    contract_conflict_counts=Counter()
     content_image_index={}
     content_image_summary={'status':'UNAVAILABLE'}
     try:
@@ -413,6 +424,8 @@ def run():
         if image_url:
             images.append({'url':image_url,'width':int(v.get('featured_image_width') or 0),
                            'height':int(v.get('featured_image_height') or 0)})
+        if cid in ui_contract_conflicts and not is_fhm:
+            contract_conflict_counts[cid]+=1
         pipeline_inputs.append({
             'sku':sku,'barcode':barcode,'vendor':v.get('vendor'),
             'sku_unique':bool(sku and shop_skus[sku]==1),
@@ -423,11 +436,13 @@ def run():
             'category_id':cid,
             'category_confirmed':category_confirmed,
             'category_basis':category_basis,
-            'required_attributes':[{'field_id':_norm(a.get('field_id')),
-                                    'value':'',
-                                    'dictionary_required':True,
-                                    'dictionary_confirmed':False}
-                                   for a in taxonomy_required.get(cid,[])],
+            'category_contract_conflict':cid in ui_contract_conflicts,
+            'required_attributes':[] if cid in ui_contract_conflicts else
+                [{'field_id':_norm(a.get('field_id')),
+                  'value':'',
+                  'dictionary_required':True,
+                  'dictionary_confirmed':False}
+                 for a in taxonomy_required.get(cid,[])],
             'required_attributes_complete':False,
             'locales':locs,'images':images,
             'main_image_neutral_verified':_norm(m.get('220_image_rule_status'))=='PASS',
@@ -537,6 +552,12 @@ def run():
         'translation_queue_variants':len(translation_queue),
         'master_or_shopify_sources_only':True,
         'translation_writes':0}
+    summary['phh_contract_conflicts']={
+        'categories':ui_contract_conflicts,
+        'variant_counts':dict(contract_conflict_counts),
+        'create_authorized':False,
+        'resolution_required':True,
+        'writes':0}
     summary['category_evidence']={
         'source':'v4_exact_identity_plus_unique_exact_shopify_phh_leaf',
         'artifact_status':category_artifact_status,
