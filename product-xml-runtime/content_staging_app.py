@@ -499,7 +499,7 @@ def existing_catalog_autocheck_scope_summary():
                 title_cf=title.casefold()
                 direct_kayak=(ptype_cf in {'kayak','kayaks','kajaks','kajaki','kajak'} or bool(tag_cf & {'kayak','kayaks','kajaks','kajaki','kajak'}))
                 title_kayak=('kayak' in title_cf or 'kajak' in title_cf)
-                accessory_terms=('holder','mount','rack','bracket','paddle holder','accessory','accessories','rail mount')
+                accessory_terms=('holder','mount','rack','bracket','paddle','bag','crate','seat','cover','trolley','cart','anchor','accessory','accessories','rail','carrier','roof','storage','motor mount','rod holder')
                 title_accessory=any(x in title_cf for x in accessory_terms)
                 if direct_kayak or (title_kayak and not title_accessory):
                     reason='KAYAK'
