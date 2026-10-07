@@ -293,6 +293,14 @@ def run():
     category_rule_variant_coverage=sum(int(r.get('variant_count') or 0)
                                        for r in exact_category_rule_rows
                                        if r.get('status')=='AUTO_EXACT_LEAF')
+    content_image_index={}
+    content_image_summary={'status':'UNAVAILABLE'}
+    try:
+        from content_image_evidence import load_latest as load_content_images
+        content_image_index,content_image_summary=load_content_images(os.getenv('DATABASE_URL',''))
+    except Exception as e:
+        content_image_summary={'status':'ERROR_'+type(e).__name__,'writes':0}
+    content_image_live=Counter()
     pipeline_inputs=[]
     translation_queue=[]
     for v in variants:
@@ -371,6 +379,11 @@ def run():
                 'targets':'|'.join(missing_translation_targets),
                 'preferred_source':'lv' if product_translations.get('lv') else ('ru' if product_translations.get('ru') else 'SHOPIFY_BASE'),
                 'writes':'0'})
+        image_ev=content_image_index.get((sku,_ean13(barcode))) if _ean13(barcode) else None
+        if image_ev and (not image_ev.get('variant_id') or image_ev.get('variant_id')==vid):
+            content_image_live['EXACT_CONTENT_IMAGE_IDENTITY']+=1
+            if image_ev.get('two_images_verified'): content_image_live['TWO_IMAGES_600_DIRECT']+=1
+            if image_ev.get('main_neutral_verified'): content_image_live['MAIN_NEUTRAL_VERIFIED']+=1
         images=[]
         image_url=_norm(m.get('220_main_image_url') or v.get('featured_image_url'))
         if image_url:
@@ -477,6 +490,12 @@ def run():
     summary['source_quality']={'barcode_non_fhm':dict(barcode_profile),
               'live_price_non_fhm':dict(price_profile),
               'locale_coverage_non_fhm':dict(locale_profile)}
+    summary['image_evidence']={
+        'snapshot':content_image_summary,
+        'live_exact_identity_counts':dict(content_image_live),
+        'pipeline_image_gate_unchanged':True,
+        'reason':'Stored direct/dimension evidence is reused for diagnostics; PHH no-query URLs and neutral main background remain fail-closed.',
+        'writes':0}
     summary['translation_evidence']={
         'status':translation_status,
         'source_error_class':'READ_TRANSLATIONS_SCOPE_MISSING' if translation_status=='BLOCKED_SOURCE_SCOPE' else ('OTHER' if translation_error else ''),
