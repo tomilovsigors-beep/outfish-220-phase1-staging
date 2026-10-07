@@ -20,13 +20,42 @@ def _json(obj,status=200):
     return Response(json.dumps(obj,indent=2,sort_keys=True),status=status,mimetype='application/json')
 
 
+MASTER_READ_DIAGNOSTIC={}
+
 def _master_rows():
-    url=os.getenv('MASTER_CSV_URL') or f'https://docs.google.com/spreadsheets/d/{MASTER_SHEET_ID}/export?format=csv&gid={MASTER_GID}'
+    # Authoritative read: Google Sheets values API on the known MASTER tab.
+    # Do not use legacy CSV override URLs: they can point to stale/truncated exports.
     sa=os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
     if not sa: raise RuntimeError('GOOGLE_SERVICE_ACCOUNT_JSON missing')
-    creds=service_account.Credentials.from_service_account_info(json.loads(sa),scopes=['https://www.googleapis.com/auth/drive.readonly','https://www.googleapis.com/auth/spreadsheets.readonly'])
-    r=AuthorizedSession(creds).get(url,timeout=45); r.raise_for_status()
-    return list(csv.DictReader(io.StringIO(r.content.decode('utf-8-sig'))))
+    creds=service_account.Credentials.from_service_account_info(
+        json.loads(sa),
+        scopes=['https://www.googleapis.com/auth/drive.readonly',
+                'https://www.googleapis.com/auth/spreadsheets.readonly'])
+    sess=AuthorizedSession(creds)
+    sheet_id=os.getenv('MASTER_SHEET_ID','1xBVjjcLYqiQvy2nLtl-tGt8w_7FWefWxFa2Ltthq-7I').strip()
+    rng=os.getenv('MASTER_READ_RANGE','MASTER!A:BZ').strip()
+    from urllib.parse import quote
+    url=f'https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{quote(rng,safe="")}'
+    r=sess.get(url,params={'majorDimension':'ROWS','valueRenderOption':'FORMATTED_VALUE'},timeout=60)
+    r.raise_for_status()
+    values=(r.json() or {}).get('values') or []
+    if not values: raise RuntimeError('MASTER values API returned no rows')
+    headers=[str(x or '').strip() for x in values[0]]
+    if 'shopify_sku' not in headers or '220_sku' not in headers:
+        raise RuntimeError('MASTER header contract missing shopify_sku/220_sku')
+    rows=[]
+    for raw in values[1:]:
+        padded=list(raw)+['']*max(0,len(headers)-len(raw))
+        row={headers[i]:padded[i] for i in range(len(headers)) if headers[i]}
+        if any(str(v or '').strip() for v in row.values()):
+            rows.append(row)
+    MASTER_READ_DIAGNOSTIC.clear()
+    MASTER_READ_DIAGNOSTIC.update({
+        'source':'GOOGLE_SHEETS_VALUES_API','sheet_id_suffix':sheet_id[-6:],
+        'range':rng,'headers':len(headers),'rows':len(rows),
+        'legacy_csv_override_ignored':bool(os.getenv('MASTER_CSV_URL'))})
+    print('MASTER_READ_DIAGNOSTIC',json.dumps(MASTER_READ_DIAGNOSTIC,sort_keys=True),flush=True)
+    return rows
 
 
 def _shopify_token():
