@@ -565,6 +565,35 @@ def run():
     summary['source_quality']={'barcode_non_fhm':dict(barcode_profile),
               'live_price_non_fhm':dict(price_profile),
               'locale_coverage_non_fhm':dict(locale_profile)}
+    # PHH's own auto-check is the authoritative completeness signal for existing cards.
+    # Current verified batch: all 29 near-ready EXISTING pigu_external_ids checked read-only.
+    verified_existing_clean_ids={
+        '39241638','39241648','39241653','39241658','84144796','84144806','84144811','84144816',
+        '84145396','84145401','106261207','173765403','265105818','265414188','273857832','278865384',
+        '289949314','289952954','289954724','289991924'
+    }
+    existing_error_ids={
+        '31924606':'manufacturer_representative_info_missing',
+        '69307778':'manufacturer_representative_info_missing',
+        '73473018':'risky_words_found',
+        '87610799':'empty_fi_title_description',
+        '105943187':'mandatory_fields_missing',
+        '255641264':'mandatory_fields_missing+manufacturer_representative_info_missing',
+        '268794418':'manufacturer_representative_info_missing',
+        '289958234':'mandatory_fields_missing',
+        '289958394':'risky_words_found'
+    }
+    for r in near_ready_rows:
+        pid=_norm(r.get('pigu_external_id'))
+        if pid in verified_existing_clean_ids:
+            r['phh_autocheck_state']='VERIFIED_EXISTING'
+            r['phh_autocheck_errors']=''
+        elif pid in existing_error_ids:
+            r['phh_autocheck_state']='EXISTING_WITH_ERRORS'
+            r['phh_autocheck_errors']=existing_error_ids[pid]
+        else:
+            r['phh_autocheck_state']='NOT_CHECKED'
+            r['phh_autocheck_errors']=''
     near_ready_identity_counts=Counter(r.get('phh_identity_state') for r in near_ready_rows)
     near_ready_category_counts=Counter(r.get('phh_category_id') for r in near_ready_rows)
     near_ready_offer_status_counts=Counter(_norm(r.get('offer_status')).upper() or 'NO_OFFER' for r in near_ready_rows if r.get('phh_identity_state')=='EXISTING')
@@ -588,6 +617,12 @@ def run():
         'phh_category_counts':dict(near_ready_category_counts),
         'offer_status_counts':dict(near_ready_offer_status_counts),
         'existing_offer_health':dict(existing_offer_health),
+        'autocheck_summary':{
+            'checked':sum(1 for r in near_ready_rows if r.get('phh_autocheck_state')!='NOT_CHECKED'),
+            'verified_existing':sum(1 for r in near_ready_rows if r.get('phh_autocheck_state')=='VERIFIED_EXISTING'),
+            'existing_with_errors':sum(1 for r in near_ready_rows if r.get('phh_autocheck_state')=='EXISTING_WITH_ERRORS'),
+            'writes':0
+        },
         'create_candidates_before_absence_proof':sum(1 for r in near_ready_rows if r.get('phh_identity_state')!='EXISTING'),
         'existing_not_create_candidates':near_ready_identity_counts.get('EXISTING',0),
         'all_categories_ui_api_contract_checked':all(str(k) in ui_contract_conflicts for k in near_ready_category_counts),
@@ -646,7 +681,7 @@ def run():
         'catalog-category-backlog.csv':_csv(backlog_rows,['shopify_category_id','shopify_category_name','variants','mapped_v4','unmapped_or_review']),
         'catalog-category-rules.csv':_csv(exact_category_rule_rows,['shopify_category_id','shopify_category_name','shopify_terminal','variant_count','vendor_count','phh_category_id','phh_category_title','status','confidence','basis','phh_write']),
         'catalog-translation-queue.csv':_csv(translation_queue,['shopify_product_id','shopify_variant_id','sku','vendor','shopify_title','targets','preferred_source','writes']),
-        'near-ready-cohort.csv':_csv(near_ready_rows,['shopify_variant_id','sku','ean','vendor','shopify_category_name','phh_category_id','category_basis','contract_conflict','two_images_600_direct','main_neutral_verified','master_basis','price_eur','phh_identity_state','offer_id','offer_status','offer_amount','offer_price','modification_id','pigu_external_id','shopify_stock_live','future_stock_rule_result','price_match_diagnostic','phh_create_authorized']),
+        'near-ready-cohort.csv':_csv(near_ready_rows,['shopify_variant_id','sku','ean','vendor','shopify_category_name','phh_category_id','category_basis','contract_conflict','two_images_600_direct','main_neutral_verified','master_basis','price_eur','phh_identity_state','offer_id','offer_status','offer_amount','offer_price','modification_id','pigu_external_id','shopify_stock_live','future_stock_rule_result','price_match_diagnostic','phh_autocheck_state','phh_autocheck_errors','phh_create_authorized']),
         'full-catalog-ready-candidates.csv':_csv(ready,ready_fields),
         'full-catalog-exceptions.csv':_csv(exc,exc_fields)
     },summary
