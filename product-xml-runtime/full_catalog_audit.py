@@ -317,6 +317,7 @@ def run():
     content_image_live=Counter()
     readiness_funnel=Counter()
     readiness_by_category=defaultdict(Counter)
+    near_ready_rows=[]
     pipeline_inputs=[]
     translation_queue=[]
     for v in variants:
@@ -418,6 +419,17 @@ def run():
             if base_ok and category_confirmed and image_ev and image_ev.get('two_images_verified'):
                 readiness_funnel['+TWO_IMAGES_600_DIRECT']+=1
                 readiness_by_category[_norm(v.get('shopify_category_name'))]['+TWO_IMAGES_600_DIRECT']+=1
+                near_ready_rows.append({
+                    'shopify_variant_id':vid,'sku':sku,'ean':_ean13(barcode),
+                    'vendor':_norm(v.get('vendor')),
+                    'shopify_category_name':_norm(v.get('shopify_category_name')),
+                    'phh_category_id':cid,'category_basis':category_basis,
+                    'contract_conflict':'YES' if cid in ui_contract_conflicts else 'NO',
+                    'two_images_600_direct':'YES',
+                    'main_neutral_verified':'YES' if image_ev.get('main_neutral_verified') else 'NO',
+                    'master_basis':master_basis,'price_eur':_norm(v.get('shopify_price_live')),
+                    'phh_identity_state':phh_identity.get('status',''),
+                    'phh_create_authorized':'NO'})
             if base_ok and category_confirmed and image_ev and image_ev.get('two_images_verified') and image_ev.get('main_neutral_verified'):
                 readiness_funnel['+MAIN_NEUTRAL']+=1
                 readiness_by_category[_norm(v.get('shopify_category_name'))]['+MAIN_NEUTRAL']+=1
@@ -584,6 +596,7 @@ def run():
         'catalog-category-backlog.csv':_csv(backlog_rows,['shopify_category_id','shopify_category_name','variants','mapped_v4','unmapped_or_review']),
         'catalog-category-rules.csv':_csv(exact_category_rule_rows,['shopify_category_id','shopify_category_name','shopify_terminal','variant_count','vendor_count','phh_category_id','phh_category_title','status','confidence','basis','phh_write']),
         'catalog-translation-queue.csv':_csv(translation_queue,['shopify_product_id','shopify_variant_id','sku','vendor','shopify_title','targets','preferred_source','writes']),
+        'near-ready-cohort.csv':_csv(near_ready_rows,['shopify_variant_id','sku','ean','vendor','shopify_category_name','phh_category_id','category_basis','contract_conflict','two_images_600_direct','main_neutral_verified','master_basis','price_eur','phh_identity_state','phh_create_authorized']),
         'full-catalog-ready-candidates.csv':_csv(ready,ready_fields),
         'full-catalog-exceptions.csv':_csv(exc,exc_fields)
     },summary
