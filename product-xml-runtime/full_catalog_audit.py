@@ -304,7 +304,9 @@ def run():
         '434':{'ui_category':'Guļammaisi','api_required_count':13,'ui_required_product_feature_count':0,
                'evidence':'AUTHENTICATED_SELLER_UI_DOM_READONLY'},
         '20523':{'ui_category':'Zeķubikses','api_required_count':9,'ui_required_product_feature_count':0,
-                 'evidence':'AUTHENTICATED_SELLER_UI_READONLY'}
+                 'evidence':'AUTHENTICATED_SELLER_UI_READONLY'},
+        '11810':{'ui_category':'Šūpuļtīkli','api_required_count':9,'ui_required_product_feature_count':0,
+                 'evidence':'AUTHENTICATED_SELLER_UI_DOM_READONLY'}
     }
     contract_conflict_counts=Counter()
     content_image_index={}
@@ -543,6 +545,17 @@ def run():
     summary['source_quality']={'barcode_non_fhm':dict(barcode_profile),
               'live_price_non_fhm':dict(price_profile),
               'locale_coverage_non_fhm':dict(locale_profile)}
+    near_ready_identity_counts=Counter(r.get('phh_identity_state') for r in near_ready_rows)
+    near_ready_category_counts=Counter(r.get('phh_category_id') for r in near_ready_rows)
+    summary['near_ready_summary']={
+        'variants':len(near_ready_rows),
+        'identity_counts':dict(near_ready_identity_counts),
+        'phh_category_counts':dict(near_ready_category_counts),
+        'create_candidates_before_absence_proof':sum(1 for r in near_ready_rows if r.get('phh_identity_state')!='EXISTING'),
+        'existing_not_create_candidates':near_ready_identity_counts.get('EXISTING',0),
+        'all_categories_ui_api_contract_checked':all(str(k) in ui_contract_conflicts for k in near_ready_category_counts),
+        'create_authorized':False,
+        'writes':0}
     funnel_categories=[{'shopify_category_name':k,**dict(v)}
                        for k,v in readiness_by_category.items() if v.get('IDENTITY_PRICE_ACTIVE')]
     funnel_categories.sort(key=lambda x:(-x.get('+TWO_IMAGES_600_DIRECT',0),-x.get('+CATEGORY',0),-x.get('IDENTITY_PRICE_ACTIVE',0),x['shopify_category_name']))
