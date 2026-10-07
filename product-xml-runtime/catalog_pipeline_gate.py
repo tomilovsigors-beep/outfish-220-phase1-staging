@@ -75,6 +75,8 @@ def classify(item):
         reasons.append("PHH_ENDPOINT_NOT_CONCLUSIVE")
     if item.get("category_confirmed") is not True or not _s(item.get("category_id")):
         reasons.append("CATEGORY_NOT_CONFIRMED")
+    if item.get("category_contract_conflict") is True:
+        reasons.append("PHH_CONTRACT_CONFLICT")
     for f in item.get("required_attributes") or []:
         if not _s(f.get("value")):
             reasons.append("ATTRIBUTE_MISSING:" + _s(f.get("field_id")))
