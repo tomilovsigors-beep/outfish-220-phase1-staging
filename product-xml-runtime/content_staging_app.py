@@ -347,6 +347,7 @@ def _restore_existing_autocheck():
 
 
 def _run_existing_catalog_autocheck():
+    from collections import Counter
     with EXISTING_AUTOCHECK_LOCK:
         if EXISTING_AUTOCHECK.get('status')=='running': return
         EXISTING_AUTOCHECK.update(status='running',error=None)
