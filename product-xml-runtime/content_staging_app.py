@@ -214,6 +214,13 @@ def readiness(): return _artifact('product-xml-readiness.csv','text/csv')
 def xml_blockers(): return _artifact('product-xml-blockers.csv','text/csv')
 @app.get('/product-xml-dry-run.xml')
 def xml(): return _artifact('product-xml-dry-run.xml','application/xml')
+@app.get('/phh/autocheck-batch.json')
+def phh_autocheck_batch():
+    raw=request.args.get('ids','').strip()
+    ids=[x.strip() for x in raw.split(',') if x.strip().isdigit()][:100]
+    from pmp_autocheck_batch import run
+    return _json(run(ids))
+
 @app.get('/phh/category-contract.json')
 def phh_category_contract():
     raw=request.args.get('ids','').strip()
