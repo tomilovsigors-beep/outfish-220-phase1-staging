@@ -229,6 +229,30 @@ def run():
     category_evidence_counts=Counter()
     attribute_evidence_counts=Counter()
     category_backlog=defaultdict(lambda:Counter())
+
+    # Catalog-wide category rules from the latest authoritative PHH taxonomy.
+    exact_category_rules={}
+    exact_category_rule_rows=[]
+    taxonomy_addable={}
+    taxonomy_required=defaultdict(list)
+    taxonomy_status='UNAVAILABLE'
+    try:
+        import current_product_category_audit as _tax
+        _tax_summary,_tax_cats,_tax_attrs=_tax._latest_taxonomy(os.getenv('DATABASE_URL',''))
+        taxonomy_status='LOADED'
+        taxonomy_addable={str(c.get('category_id')):c for c in _tax_cats
+                          if str(c.get('allow_add_products')).casefold() in {'true','1','yes'}}
+        for a in _tax_attrs:
+            if str(a.get('required')).casefold() in {'true','1','yes'}:
+                taxonomy_required[str(a.get('category_id'))].append(a)
+        from catalog_category_rules import build_rules as build_category_rules
+        exact_category_rules,exact_category_rule_rows=build_category_rules(variants,_tax_cats)
+    except Exception as e:
+        taxonomy_status='ERROR_'+type(e).__name__
+    category_rule_counts=Counter(r.get('status') for r in exact_category_rule_rows)
+    category_rule_variant_coverage=sum(int(r.get('variant_count') or 0)
+                                       for r in exact_category_rule_rows
+                                       if r.get('status')=='AUTO_EXACT_LEAF')
     pipeline_inputs=[]
     for v in variants:
         sku=_norm(v.get('shopify_sku')); barcode=_norm(v.get('shopify_barcode'))
@@ -239,14 +263,23 @@ def run():
         identity=(sku,_ean13(barcode))
         mapped=category_by_identity.get(identity)
         evidence_status=(_norm(mapped.get('status')) if mapped else 'UNMAPPED')
-        cid=(_norm(mapped.get('selected_category_id')) if mapped else '')
+        mapped_cid=(_norm(mapped.get('selected_category_id')) if mapped else '')
         is_fhm=_norm(v.get('vendor')).casefold()=='fhm'
+        shop_cat_key=(_norm(v.get('shopify_category_id')),_norm(v.get('shopify_category_name')))
+        rule=exact_category_rules.get(shop_cat_key) or {}
+        rule_cid=_norm(rule.get('phh_category_id'))
+        cid=''
+        category_confirmed=False
+        category_basis=''
+        if not is_fhm and evidence_status in ('AUTO','BLOCKED_ATTRIBUTES') and mapped_cid in taxonomy_addable:
+            cid=mapped_cid; category_confirmed=True; category_basis='V4_EXACT_IDENTITY+LIVE_TAXONOMY'
+        elif not is_fhm and rule.get('status')=='AUTO_EXACT_LEAF' and rule_cid in taxonomy_addable:
+            cid=rule_cid; category_confirmed=True; category_basis='EXACT_SHOPIFY_TO_PHH_LEAF'
         if not is_fhm:
-            key=(_norm(v.get('shopify_category_id')),_norm(v.get('shopify_category_name')))
-            category_backlog[key]['variants']+=1
-            if evidence_status in ('AUTO','BLOCKED_ATTRIBUTES') and cid:
-                category_backlog[key]['mapped_v4']+=1
-                category_evidence_counts['V4_ACCEPTED_CATEGORY']+=1
+            category_backlog[shop_cat_key]['variants']+=1
+            if category_confirmed:
+                category_backlog[shop_cat_key]['mapped_v4']+=1
+                category_evidence_counts[category_basis]+=1
             else:
                 category_evidence_counts['CATEGORY_NOT_VERIFIED']+=1
             old_attr=attribute_by_identity.get(identity)
@@ -293,9 +326,14 @@ def run():
             'shopify_active':v.get('shopify_status')=='ACTIVE',
             'price_eur':v.get('shopify_price_live'),
             'phh_identity':phh_identity,
-            'category_id':cid if not is_fhm and evidence_status in ('AUTO','BLOCKED_ATTRIBUTES') else '',
-            # v4 gives category evidence, not authority to send a new PHH product.
-            'category_confirmed':False,
+            'category_id':cid,
+            'category_confirmed':category_confirmed,
+            'category_basis':category_basis,
+            'required_attributes':[{'field_id':_norm(a.get('field_id')),
+                                    'value':'',
+                                    'dictionary_required':True,
+                                    'dictionary_confirmed':False}
+                                   for a in taxonomy_required.get(cid,[])],
             'required_attributes_complete':False,
             'locales':locs,'images':images,
             'main_image_neutral_verified':_norm(m.get('220_image_rule_status'))=='PASS',
@@ -383,9 +421,12 @@ def run():
               'live_price_non_fhm':dict(price_profile),
               'locale_coverage_non_fhm':dict(locale_profile)}
     summary['category_evidence']={
-        'source':'cached_v4_exact_sku_ean_only',
+        'source':'v4_exact_identity_plus_unique_exact_shopify_phh_leaf',
         'artifact_status':category_artifact_status,
+        'taxonomy_status':taxonomy_status,
         'non_fhm_status_counts':dict(category_evidence_counts),
+        'exact_leaf_rule_status_counts':dict(category_rule_counts),
+        'exact_leaf_rule_variant_coverage':category_rule_variant_coverage,
         'existing_v11_attribute_status_counts':dict(attribute_evidence_counts),
         'category_groups_non_fhm':len(category_backlog),
         'values_dictionary_confirmed_for_import':False,
@@ -401,6 +442,7 @@ def run():
         'full-catalog-reconciliation.csv':_csv(rec,rec_fields),
         'catalog-pipeline-state.json':_json({'summary':pipeline_report,'rows':pipeline_rows}),
         'catalog-category-backlog.csv':_csv(backlog_rows,['shopify_category_id','shopify_category_name','variants','mapped_v4','unmapped_or_review']),
+        'catalog-category-rules.csv':_csv(exact_category_rule_rows,['shopify_category_id','shopify_category_name','shopify_terminal','variant_count','vendor_count','phh_category_id','phh_category_title','status','confidence','basis','phh_write']),
         'full-catalog-ready-candidates.csv':_csv(ready,ready_fields),
         'full-catalog-exceptions.csv':_csv(exc,exc_fields)
     },summary
