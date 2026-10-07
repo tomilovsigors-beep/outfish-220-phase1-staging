@@ -418,6 +418,32 @@ def existing_catalog_autocheck_status():
                       'summary':EXISTING_AUTOCHECK.get('summary') or {},
                       'last_refresh':EXISTING_AUTOCHECK.get('last_refresh')})
 
+@app.get('/phh/manufacturer-openapi.json')
+def phh_manufacturer_openapi():
+    try:
+        from pmp_api_probe import _docs_get,_embedded_spec
+        docs=_docs_get('/docs',timeout=20); docs.raise_for_status()
+        spec=_embedded_spec(docs.text)
+        paths=[]
+        for path,ops in sorted((spec.get('paths') or {}).items()):
+            blob=(path+' '+json.dumps(ops,ensure_ascii=False)).casefold()
+            if not any(x in blob for x in ('manufacturer','representative')):
+                continue
+            item={'path':path,'methods':{}}
+            for method in ('get','post','put','patch','delete'):
+                op=(ops or {}).get(method)
+                if isinstance(op,dict):
+                    item['methods'][method.upper()]={'operation_id':op.get('operationId'),'summary':op.get('summary'),'parameters':op.get('parameters'),'responses':op.get('responses'),'requestBody':op.get('requestBody')}
+            paths.append(item)
+        schemas={}
+        for name,schema in ((spec.get('components') or {}).get('schemas') or {}).items():
+            blob=(name+' '+json.dumps(schema,ensure_ascii=False)).casefold()
+            if any(x in blob for x in ('manufacturer','representative')):
+                schemas[name]=schema
+        return _json({'status':'PASS','paths':paths,'schemas':schemas,'writes':0})
+    except Exception as e:
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {str(e)[:300]}','writes':0},500)
+
 @app.get('/phh/existing-catalog-autocheck/manufacturer-groups.json')
 def existing_catalog_autocheck_manufacturer_groups():
     from collections import Counter
