@@ -1,5 +1,5 @@
 from __future__ import annotations
-import csv, io, json, os, threading, time, traceback, hashlib
+import csv, io, json, os, threading, time, traceback, hashlib, requests
 from flask import Flask, Response, request
 from app import _master_rows, _shopify_products, _load_json
 from generator import build
