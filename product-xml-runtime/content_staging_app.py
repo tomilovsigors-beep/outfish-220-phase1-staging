@@ -418,6 +418,48 @@ def existing_catalog_autocheck_status():
                       'summary':EXISTING_AUTOCHECK.get('summary') or {},
                       'last_refresh':EXISTING_AUTOCHECK.get('last_refresh')})
 
+@app.get('/phh/manufacturer-read-paths.json')
+def phh_manufacturer_read_paths():
+    try:
+        from pmp_api_probe import _docs_get,_embedded_spec
+        docs=_docs_get('/docs',timeout=20); docs.raise_for_status()
+        spec=_embedded_spec(docs.text)
+        schemas=((spec.get('components') or {}).get('schemas') or {})
+        def schema_has_compliance(obj,seen=None):
+            seen=set() if seen is None else seen
+            if isinstance(obj,dict):
+                ref=obj.get('$ref')
+                if isinstance(ref,str) and ref.startswith('#/components/schemas/'):
+                    name=ref.rsplit('/',1)[-1]
+                    if name in seen: return False
+                    seen.add(name)
+                    return schema_has_compliance(schemas.get(name) or {},seen)
+                props=obj.get('properties') or {}
+                if any(k in props for k in ('manufacturer_name','manufacturer_address','manufacturer_email','representative_name','representative_address','representative_email')):
+                    return True
+                return any(schema_has_compliance(v,seen.copy()) for v in obj.values())
+            if isinstance(obj,list):
+                return any(schema_has_compliance(v,seen.copy()) for v in obj)
+            return False
+        hits=[]
+        for path,ops in sorted((spec.get('paths') or {}).items()):
+            op=(ops or {}).get('get')
+            if not isinstance(op,dict): continue
+            responses=op.get('responses') or {}
+            matched=[]
+            for code,resp in responses.items():
+                content=(resp or {}).get('content') or {}
+                for mime,body in content.items():
+                    sch=(body or {}).get('schema')
+                    if sch and schema_has_compliance(sch):
+                        matched.append({'status':code,'mime':mime,'schema':sch})
+            if matched:
+                hits.append({'path':path,'operation_id':op.get('operationId'),'summary':op.get('summary'),
+                             'parameters':op.get('parameters') or [],'responses':matched})
+        return _json({'status':'PASS','read_paths':hits,'count':len(hits),'writes':0})
+    except Exception as e:
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {str(e)[:300]}','writes':0},500)
+
 @app.get('/phh/manufacturer-openapi.json')
 def phh_manufacturer_openapi():
     try:
