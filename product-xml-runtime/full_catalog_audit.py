@@ -10,6 +10,10 @@ from phh_master_audit_v30 import lookup_ean, scan_offers, _offer_eans, _offer_sk
 API_VERSION='2026-07'
 
 def _norm(v): return '' if v is None else str(v).strip()
+def _is_fhm_variant(v):
+    vendor=_norm(v.get('vendor')).casefold()
+    title=_norm(v.get('shopify_title') or v.get('title'))
+    return vendor=='fhm' or bool(re.search(r'(?<![A-Za-z0-9])FHM(?![A-Za-z0-9])',title,re.I))
 def _csv(rows, fields):
     s=io.StringIO(newline=''); w=csv.DictWriter(s,fieldnames=fields); w.writeheader(); w.writerows(rows)
     return s.getvalue().encode('utf-8-sig')
@@ -122,7 +126,7 @@ def run():
         row={**v,'reconciliation_status':status,'match_basis':match_basis,'master_row':candidates[0][0] if len(candidates)==1 else '','reasons':'|'.join(reasons)}
         rec.append(row)
         candidate_blockers=list(reasons)
-        if _norm(v.get('vendor')).casefold()=='fhm': candidate_blockers.append('EXCLUDED_FHM')
+        if _is_fhm_variant(v): candidate_blockers.append('EXCLUDED_FHM')
         # NEW is a valid Product XML discovery state: PHH existence decides CREATE vs SKIP.\n        # Only ambiguous/duplicate reconciliation is unsafe and must stop before PHH identity gating.\n        if status not in ('MATCHED','NEW'): candidate_blockers.append('RECONCILIATION_'+status)
         if v['shopify_status']!='ACTIVE': candidate_blockers.append('SHOPIFY_NOT_ACTIVE')
         if not v['shopify_title']: candidate_blockers.append('MISSING_TITLE')
@@ -153,7 +157,7 @@ def run():
          and not by_ean.get(_norm(row.get('shopify_barcode')))
          and not by_sku.get(_norm(row.get('shopify_sku')))),
         key=lambda row: (
-            0 if row.get('reconciliation_status')=='NEW' and _norm(row.get('vendor')).casefold()!='fhm' else 1,
+            0 if row.get('reconciliation_status')=='NEW' and not _is_fhm_variant(row) else 1,
             _norm(row.get('shopify_product_id')),
             _norm(row.get('shopify_sku'))
         )
@@ -333,7 +337,7 @@ def run():
         mapped=category_by_identity.get(identity)
         evidence_status=(_norm(mapped.get('status')) if mapped else 'UNMAPPED')
         mapped_cid=(_norm(mapped.get('selected_category_id')) if mapped else '')
-        is_fhm=_norm(v.get('vendor')).casefold()=='fhm'
+        is_fhm=_is_fhm_variant(v)
         shop_cat_key=(_norm(v.get('shopify_category_id')),_norm(v.get('shopify_category_name')))
         rule=exact_category_rules.get(shop_cat_key) or {}
         rule_cid=_norm(rule.get('phh_category_id'))
@@ -512,7 +516,7 @@ def run():
     price_profile=Counter()
     locale_profile=Counter()
     for v in variants:
-        if _norm(v.get('vendor')).casefold()=='fhm': continue
+        if _is_fhm_variant(v): continue
         raw=_norm(v.get('shopify_barcode'))
         if not raw:
             barcode_profile['MISSING']+=1
