@@ -408,21 +408,26 @@
       "title_match": "Baseball cap Camo",
       "vendor_group": "Outfish",
       "manufacturer": {
-        "name": "YUPOONG Inc.",
-        "address": "Hans Tower, 34 Gongwon-Ro, Guro-Gu, Guro-dong, Seoul, South Korea",
-        "country": "KR",
-        "status": "VERIFIED",
-        "source_url": "https://www.tbint.de/data/TB-Brandbook-SS20_web.pdf"
+        "name": "TB International GmbH",
+        "address": "Dr.-Robert-Murjahn-Str. 7, 64372 Ober-Ramstadt, Germany",
+        "email": "info@tbint.de",
+        "country": "DE",
+        "status": "VERIFIED_PRODUCT_FAMILY",
+        "source_url": "https://www.debenhams.com/product/yupoong-classic-snapback-cap_p-cc984c08-8211-4b98-9b6c-b8937908c2eb",
+        "evidence_urls": [
+          "https://flexfit-assets.s3.us-west-1.amazonaws.com/catalogs/flexfit-2024b-digital-catalog.pdf",
+          "https://www.flexfit.jp/item/2023/6606VC.html"
+        ]
       },
       "eu_responsible_person": {
         "name": "TB International GmbH",
         "address": "Dr.-Robert-Murjahn-Str. 7, 64372 Ober-Ramstadt, Germany",
-        "email": "info@flexfit-europe.com",
+        "email": "info@tbint.de",
         "country": "DE",
-        "status": "EU_HUB_VERIFIED_RESPONSIBLE_PERSON_ROLE_PENDING",
-        "source_url": "https://www.tbint.de/data/FF_SS20_Katalog_web.pdf"
+        "status": "VERIFIED",
+        "source_url": "https://www.debenhams.com/product/yupoong-classic-snapback-cap_p-cc984c08-8211-4b98-9b6c-b8937908c2eb"
       },
-      "phh_status": "MANUFACTURER_VERIFIED_EU_OPERATOR_ROLE_PENDING"
+      "phh_status": "MANUFACTURER_AND_EU_RESPONSIBLE_PERSON_VERIFIED"
     }
   ],
   "exclusions": [
