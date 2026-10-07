@@ -428,6 +428,14 @@ def existing_catalog_autocheck_manufacturer_groups():
         error=EXISTING_AUTOCHECK.get('error')
         source_rows=list(EXISTING_AUTOCHECK.get('rows') or [])
         last_refresh=EXISTING_AUTOCHECK.get('last_refresh')
+    master_by_variant={}
+    try:
+        for m in _master_rows():
+            vid=str(m.get('shopify_variant_id') or '').strip()
+            if vid:
+                master_by_variant[vid]=m
+    except Exception:
+        master_by_variant={}
     rows=[]
     groups={}
     for src in source_rows:
@@ -441,6 +449,10 @@ def existing_catalog_autocheck_manufacturer_groups():
             'shopify_variant_id','shopify_sku','shopify_barcode','shopify_title','variant_title',
             'vendor','pigu_external_id','offer_id','modification_id','phh_autocheck_state',
             'phh_autocheck_errors','phh_autocheck_locales') if k in src}
+        m=master_by_variant.get(str(src.get('shopify_variant_id') or '').strip()) or {}
+        for k in ('shopify_sku','shopify_barcode','shopify_title','variant_title','product_type','220_title','220_ean','220_manufacturer_name','220_manufacturer_email','220_manufacturer_address','220_manufacturer_source_url'):
+            if not row.get(k) and m.get(k) not in (None,''):
+                row[k]=m.get(k)
         rows.append(row)
         bucket=groups.setdefault(vendor,{'vendor':vendor,'count':0,'sample_skus':[],'pigu_external_ids':[]})
         bucket['count']+=1
