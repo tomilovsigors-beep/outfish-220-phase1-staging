@@ -566,6 +566,48 @@ def existing_catalog_autocheck_scope_summary():
     except Exception as e:
         return _json({'status':'LIVE_SCOPE_JOIN_FAILED','error':f'{type(e).__name__}: {str(e)[:300]}','phh_writes':0,'shopify_writes':0},502)
 
+@app.get('/phh/manufacturer-readiness-summary.json')
+def phh_manufacturer_readiness_summary():
+    try:
+        registry=_load_json('manufacturer_compliance_registry.json') or {}
+        recs={str(r.get('vendor_group') or '').casefold():r for r in (registry.get('records') or [])}
+        with EXISTING_AUTOCHECK_LOCK:
+            source_rows=list(EXISTING_AUTOCHECK.get('rows') or [])
+            last_refresh=EXISTING_AUTOCHECK.get('last_refresh')
+            status=EXISTING_AUTOCHECK.get('status')
+        groups={}
+        code='manufacturer_representative_info_missing'
+        for row in source_rows:
+            codes={x for x in str(row.get('phh_autocheck_errors') or '').split('|') if x}
+            if code not in codes: continue
+            vendor=str(row.get('vendor') or '').strip() or '(blank)'
+            groups[vendor]=groups.get(vendor,0)+1
+        buckets={'READY_LEGAL_EU_TECH_PENDING':0,'MANUFACTURER_VERIFIED_EU_RESPONSIBLE_PENDING':0,
+                 'LEGAL_OPERATOR_ONLY':0,'MANUFACTURER_UNVERIFIED':0,'OTHER_PARTIAL':0}
+        items=[]
+        for vendor,count in sorted(groups.items(),key=lambda kv:(-kv[1],kv[0].casefold())):
+            rec=recs.get(vendor.casefold()) or {}
+            phh=str(rec.get('phh_status') or '')
+            m=(rec.get('manufacturer') or {})
+            if phh=='MANUFACTURER_READY_REPRESENTATIVE_TECHNICAL_SEMANTICS_PENDING':
+                bucket='READY_LEGAL_EU_TECH_PENDING'
+            elif phh in {'BLOCKED_EU_RESPONSIBLE_PERSON','BLOCKED_EU_RESPONSIBLE_PERSON_ADDRESS'} or (m.get('status')=='VERIFIED' and str(m.get('country') or '') not in {'PL','IT','LT','LV','DE','FR','ES','EE','FI','SE','DK','NL','BE','AT','IE','PT','CZ','SK','SI','HR','HU','RO','BG','GR','CY','MT','LU'}):
+                bucket='MANUFACTURER_VERIFIED_EU_RESPONSIBLE_PENDING'
+            elif rec.get('legal_operator') and m.get('status')!='VERIFIED':
+                bucket='LEGAL_OPERATOR_ONLY'
+            elif not rec or m.get('status') in {None,'','UNVERIFIED','NOT_INFERRED_FROM_BRAND_OWNER'}:
+                bucket='MANUFACTURER_UNVERIFIED'
+            else:
+                bucket='OTHER_PARTIAL'
+            buckets[bucket]+=count
+            items.append({'vendor':vendor,'count':count,'bucket':bucket,'phh_status':phh or None,
+                          'manufacturer_status':m.get('status'),'manufacturer_name':m.get('name')})
+        return _json({'status':status,'last_refresh':last_refresh,'total':sum(groups.values()),
+                      'group_count':len(groups),'buckets':buckets,'groups':items,
+                      'registry_updated_at':registry.get('updated_at'),'phh_writes':0})
+    except Exception as e:
+        return _json({'status':'ERROR','error':f'{type(e).__name__}: {str(e)[:300]}','phh_writes':0},500)
+
 @app.get('/phh/existing-catalog-autocheck/manufacturer-groups.json')
 def existing_catalog_autocheck_manufacturer_groups():
     from collections import Counter
