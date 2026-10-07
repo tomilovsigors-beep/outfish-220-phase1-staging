@@ -93,6 +93,54 @@
         "status": "NOT_INFERRED_FROM_BRAND_OWNER"
       },
       "phh_status": "PRODUCT_MODEL_MANUFACTURER_VERIFICATION_REQUIRED"
+    },
+    {
+      "vendor_group": "Humtto",
+      "manufacturer": {
+        "name": "Quanzhou HUMTTO Outdoor Products Co., Ltd.",
+        "address": "4th Floor, No. 8 Shuangxue Road, Jinjiang City, Fujian Province, China",
+        "email": "humtto1985@humtto.com",
+        "country": "CN",
+        "status": "VERIFIED",
+        "source_url": "https://en.humtto.com/Contact.html"
+      },
+      "eu_responsible_person": {
+        "status": "UNVERIFIED"
+      },
+      "phh_status": "BLOCKED_EU_RESPONSIBLE_PERSON"
+    },
+    {
+      "vendor_group": "Suited systems",
+      "legal_operator": {
+        "name": "SIA Movilog",
+        "registration_number": "40203370382",
+        "address": "Plienciema Street 16, Marupe, LV-2167, Latvia",
+        "email": "info@suitedsystems.com",
+        "country": "LV",
+        "status": "VERIFIED",
+        "source_url": "https://www.suitedsystems.com/policies/privacy-policy"
+      },
+      "manufacturing_evidence": {
+        "status": "VERIFIED_BRAND_LEVEL",
+        "fact": "Suited Systems states all products are designed and manufactured in Latvia, Europe.",
+        "source_url": "https://www.suitedsystems.com/blogs/news/made-in-europe"
+      },
+      "manufacturer": {
+        "status": "CANDIDATE_SIA_MOVILOG_NOT_EXPLICITLY_NAMED_AS_MANUFACTURER"
+      },
+      "phh_status": "LEGAL_OPERATOR_VERIFIED_MANUFACTURER_NAME_PENDING"
+    },
+    {
+      "vendor_group": "Dry Walker",
+      "manufacturer": {
+        "status": "UNVERIFIED"
+      },
+      "evidence": {
+        "brand_trademark_holder": "DWS WIND TURBINE SERVICE SP. Z O.O. appears as DRY WALKER trademark holder in Polish patent bulletin",
+        "supplier_signal": "4IQ is listed as supplier for multiple DRY WALKER boots by Grupa PSB",
+        "status": "INSUFFICIENT_FOR_PHYSICAL_MANUFACTURER"
+      },
+      "phh_status": "BLOCKED_MANUFACTURER_IDENTITY"
     }
   ]
 }
