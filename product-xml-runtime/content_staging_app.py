@@ -496,19 +496,27 @@ def existing_catalog_autocheck_manufacturer_groups():
             return _json({'status':'LIVE_SHOPIFY_JOIN_FAILED','error':f'{type(e).__name__}: {str(e)[:250]}','phh_writes':0},502)
     grouped=sorted(groups.values(),key=lambda x:(-x['count'],x['vendor'].lower()))
     title_prefix_counts=Counter()
+    live_title_counts=Counter()
+    live_status_counts=Counter()
     fhm_title_count=0
+    outfish_named_count=0
     compact_rows=[]
     for row in rows:
         title=str(row.get('live_product_title') or row.get('shopify_title') or row.get('220_title') or '').strip()
         prefix=(title.split()[0] if title else '(blank)')
         title_prefix_counts[prefix]+=1
+        if title:
+            live_title_counts[title]+=1
+        live_status_counts[str(row.get('live_product_status') or '(unknown)')]+=1
+        if 'OUTFISH' in title.upper().split() or 'OUTFISH' in title.upper():
+            outfish_named_count+=1
         if 'FHM' in title.upper().split() or any(str(t).upper()=='FHM' for t in (row.get('live_product_tags') or [])):
             fhm_title_count+=1
         compact_rows.append({k:row.get(k) for k in ('shopify_variant_id','shopify_sku','shopify_barcode','shopify_title','variant_title','product_type','pigu_external_id','offer_id','modification_id','live_shopify_sku','live_shopify_barcode','live_variant_title','live_product_title','live_product_vendor','live_product_type','live_product_status','live_product_tags')})
     compact=str(request.args.get('compact') or '').strip()=='1'
     return _json({'status':status,'error':error,'code':code,'vendor_filter':vendor_filter or None,'count':len(rows),
                   'group_count':len(grouped),'groups':grouped,
-                  'title_prefix_counts':dict(title_prefix_counts),'fhm_title_count':fhm_title_count,'live_shopify_join':live_join,
+                  'title_prefix_counts':dict(title_prefix_counts),'live_title_counts':dict(live_title_counts),'distinct_live_titles':len(live_title_counts),'live_status_counts':dict(live_status_counts),'outfish_named_count':outfish_named_count,'fhm_title_count':fhm_title_count,'live_shopify_join':live_join,
                   'rows':compact_rows if compact else rows,
                   'last_refresh':last_refresh,'phh_writes':0})
 
