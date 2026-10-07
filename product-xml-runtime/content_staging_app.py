@@ -571,40 +571,113 @@ def phh_manufacturer_readiness_summary():
     try:
         registry=_load_json('manufacturer_compliance_registry.json') or {}
         recs={str(r.get('vendor_group') or '').casefold():r for r in (registry.get('records') or [])}
+        overrides={str(x.get('shopify_sku') or '').strip():x for x in (registry.get('product_overrides') or []) if str(x.get('shopify_sku') or '').strip()}
+        exclusions=list(registry.get('exclusions') or [])
         with EXISTING_AUTOCHECK_LOCK:
-            source_rows=list(EXISTING_AUTOCHECK.get('rows') or [])
+            source_rows=[dict(x) for x in (EXISTING_AUTOCHECK.get('rows') or [])]
             last_refresh=EXISTING_AUTOCHECK.get('last_refresh')
             status=EXISTING_AUTOCHECK.get('status')
-        groups={}
-        code='manufacturer_representative_info_missing'
+        relevant=[]
         for row in source_rows:
             codes={x for x in str(row.get('phh_autocheck_errors') or '').split('|') if x}
-            if code not in codes: continue
+            if 'manufacturer_representative_info_missing' in codes:
+                relevant.append(row)
+
+        live_by_variant={}
+        try:
+            from app import _shopify_token
+            token=_shopify_token()
+            shop=os.getenv('SHOPIFY_SHOP_DOMAIN','153ac6-2.myshopify.com').strip()
+            ids=sorted({str(r.get('shopify_variant_id') or '').strip() for r in relevant if str(r.get('shopify_variant_id') or '').strip()})
+            query='''query ComplianceReadinessVariants($ids:[ID!]!){nodes(ids:$ids){... on ProductVariant{id sku price product{title handle vendor status tags}}}}'''
+            for i in range(0,len(ids),50):
+                batch=ids[i:i+50]
+                resp=requests.post(f'https://{shop}/admin/api/2026-07/graphql.json',
+                    headers={'X-Shopify-Access-Token':token,'Content-Type':'application/json'},
+                    json={'query':query,'variables':{'ids':batch}},timeout=90)
+                resp.raise_for_status()
+                payload=resp.json()
+                if payload.get('errors'):
+                    raise RuntimeError('Shopify GraphQL errors: '+json.dumps(payload['errors'])[:1200])
+                for node in ((payload.get('data') or {}).get('nodes') or []):
+                    if node and node.get('id'):
+                        live_by_variant[str(node['id'])]=node
+        except Exception:
+            live_by_variant={}
+
+        buckets={
+            'EXCLUDED_PROJECT_RULE':0,
+            'READY_LEGAL_EU_TECH_PENDING':0,
+            'READY_MANUFACTURER_AND_EU_OPERATOR_TECH_PENDING':0,
+            'MANUFACTURER_VERIFIED_EU_OPERATOR_ROLE_PENDING':0,
+            'MANUFACTURER_VERIFIED_EU_RESPONSIBLE_PENDING':0,
+            'MANUFACTURER_UNVERIFIED':0,
+            'OTHER_PARTIAL':0
+        }
+        group_counts={}
+        group_bucket_counts={}
+        samples={}
+        for row in relevant:
             vendor=str(row.get('vendor') or '').strip() or '(blank)'
-            groups[vendor]=groups.get(vendor,0)+1
-        buckets={'READY_LEGAL_EU_TECH_PENDING':0,'MANUFACTURER_VERIFIED_EU_RESPONSIBLE_PENDING':0,
-                 'LEGAL_OPERATOR_ONLY':0,'MANUFACTURER_UNVERIFIED':0,'OTHER_PARTIAL':0}
-        items=[]
-        for vendor,count in sorted(groups.items(),key=lambda kv:(-kv[1],kv[0].casefold())):
-            rec=recs.get(vendor.casefold()) or {}
-            phh=str(rec.get('phh_status') or '')
+            node=live_by_variant.get(str(row.get('shopify_variant_id') or '').strip()) or {}
+            product=node.get('product') or {}
+            sku=str(node.get('sku') or row.get('shopify_sku') or '').strip()
+            title=str(product.get('title') or row.get('shopify_title') or '').strip()
+            handle=str(product.get('handle') or '').strip()
+            override=overrides.get(sku)
+            rec=override or recs.get(vendor.casefold()) or {}
             m=(rec.get('manufacturer') or {})
-            if phh=='MANUFACTURER_READY_REPRESENTATIVE_TECHNICAL_SEMANTICS_PENDING':
+            phh=str(rec.get('phh_status') or '')
+
+            excluded=False
+            for rule in exclusions:
+                if rule.get('shopify_product_handle') and handle==str(rule.get('shopify_product_handle')):
+                    excluded=True
+                    break
+            if excluded:
+                bucket='EXCLUDED_PROJECT_RULE'
+            elif override:
+                if phh=='MANUFACTURER_READY_REPRESENTATIVE_TECHNICAL_SEMANTICS_PENDING':
+                    bucket='READY_LEGAL_EU_TECH_PENDING'
+                elif phh=='MANUFACTURER_AND_EU_RESPONSIBLE_PERSON_VERIFIED':
+                    bucket='READY_MANUFACTURER_AND_EU_OPERATOR_TECH_PENDING'
+                else:
+                    bucket='MANUFACTURER_VERIFIED_EU_OPERATOR_ROLE_PENDING'
+            elif vendor.casefold()=='outfish':
+                verified_titles=set(str(x).casefold() for x in ((m.get('verified_product_titles') or [])))
+                if 'outfish' in title.casefold() or title.casefold() in verified_titles:
+                    bucket='READY_LEGAL_EU_TECH_PENDING'
+                else:
+                    bucket='MANUFACTURER_UNVERIFIED'
+            elif phh=='MANUFACTURER_AND_EU_RESPONSIBLE_PERSON_VERIFIED':
+                bucket='READY_MANUFACTURER_AND_EU_OPERATOR_TECH_PENDING'
+            elif phh=='MANUFACTURER_READY_REPRESENTATIVE_TECHNICAL_SEMANTICS_PENDING':
                 bucket='READY_LEGAL_EU_TECH_PENDING'
-            elif phh in {'BLOCKED_EU_RESPONSIBLE_PERSON','BLOCKED_EU_RESPONSIBLE_PERSON_ADDRESS'} or (m.get('status')=='VERIFIED' and str(m.get('country') or '') not in {'PL','IT','LT','LV','DE','FR','ES','EE','FI','SE','DK','NL','BE','AT','IE','PT','CZ','SK','SI','HR','HU','RO','BG','GR','CY','MT','LU'}):
+            elif phh=='MANUFACTURER_VERIFIED_EU_OPERATOR_ROLE_PENDING':
+                bucket='MANUFACTURER_VERIFIED_EU_OPERATOR_ROLE_PENDING'
+            elif phh in {'BLOCKED_EU_RESPONSIBLE_PERSON','BLOCKED_EU_RESPONSIBLE_PERSON_ADDRESS'}:
                 bucket='MANUFACTURER_VERIFIED_EU_RESPONSIBLE_PENDING'
-            elif rec.get('legal_operator') and m.get('status')!='VERIFIED':
-                bucket='LEGAL_OPERATOR_ONLY'
-            elif not rec or m.get('status') in {None,'','UNVERIFIED','NOT_INFERRED_FROM_BRAND_OWNER'}:
-                bucket='MANUFACTURER_UNVERIFIED'
-            else:
+            elif m.get('status') and str(m.get('status')).startswith('VERIFIED'):
                 bucket='OTHER_PARTIAL'
-            buckets[bucket]+=count
-            items.append({'vendor':vendor,'count':count,'bucket':bucket,'phh_status':phh or None,
-                          'manufacturer_status':m.get('status'),'manufacturer_name':m.get('name')})
-        return _json({'status':status,'last_refresh':last_refresh,'total':sum(groups.values()),
-                      'group_count':len(groups),'buckets':buckets,'groups':items,
-                      'registry_updated_at':registry.get('updated_at'),'phh_writes':0})
+            else:
+                bucket='MANUFACTURER_UNVERIFIED'
+
+            buckets[bucket]+=1
+            group_counts[vendor]=group_counts.get(vendor,0)+1
+            gbc=group_bucket_counts.setdefault(vendor,{})
+            gbc[bucket]=gbc.get(bucket,0)+1
+            if len(samples.setdefault(vendor,[]))<5:
+                samples[vendor].append({'sku':sku,'title':title,'bucket':bucket})
+
+        items=[]
+        for vendor,count in sorted(group_counts.items(),key=lambda kv:(-kv[1],kv[0].casefold())):
+            items.append({'vendor':vendor,'count':count,'bucket_counts':group_bucket_counts.get(vendor) or {},
+                          'samples':samples.get(vendor) or []})
+        return _json({'status':status,'last_refresh':last_refresh,'total_raw':len(relevant),
+                      'total_in_scope':len(relevant)-buckets['EXCLUDED_PROJECT_RULE'],
+                      'group_count':len(group_counts),'live_resolved':len(live_by_variant),
+                      'buckets':buckets,'groups':items,
+                      'registry_updated_at':registry.get('updated_at'),'phh_writes':0,'shopify_writes':0})
     except Exception as e:
         return _json({'status':'ERROR','error':f'{type(e).__name__}: {str(e)[:300]}','phh_writes':0},500)
 
