@@ -1,0 +1,68 @@
+from __future__ import annotations
+import json, os, time
+from urllib.parse import urljoin
+import requests
+from pmp_api_probe import BASE, _api_login
+from phh_master_audit_v30 import scan_offers, _offer_skus, _s
+from app import _shopify_token
+
+TARGET_SKUS=["STAL/02/35-38","OUTF420","ss11474"]
+
+def _phh_headers(token):
+    return {"User-Agent":"outfish-owner-stock-batch3/1.0","Accept":"application/json","Content-Type":"application/json","Authorization":"Pigu-mp "+token}
+
+def _shopify_live():
+    token=_shopify_token()
+    shop=os.getenv("SHOPIFY_SHOP_DOMAIN","153ac6-2.myshopify.com").strip()
+    q='''query StockOwnerBatch($query:String!){productVariants(first:10,query:$query){edges{node{id sku inventoryQuantity product{title status}}}}}'''
+    out={}
+    for sku in TARGET_SKUS:
+        r=requests.post(f"https://{shop}/admin/api/2026-07/graphql.json",
+            headers={"X-Shopify-Access-Token":token,"Content-Type":"application/json"},
+            json={"query":q,"variables":{"query":f"sku:{sku}"}},timeout=60)
+        r.raise_for_status(); p=r.json()
+        if p.get("errors"): raise RuntimeError(json.dumps(p["errors"])[:1000])
+        matches=[]
+        for e in (((p.get("data") or {}).get("productVariants") or {}).get("edges") or []):
+            n=(e or {}).get("node") or {}
+            if str(n.get("sku") or "").strip()==sku: matches.append(n)
+        if len(matches)!=1: raise RuntimeError(f"{sku}: expected 1 Shopify variant, got {len(matches)}")
+        n=matches[0]; qty=int(n.get("inventoryQuantity"))
+        if qty<0: raise RuntimeError(f"{sku}: negative Shopify stock {qty}")
+        out[sku]={"qty":qty,"title":((n.get("product") or {}).get("title")),"status":((n.get("product") or {}).get("status"))}
+    return out
+
+def run():
+    shop=_shopify_live()
+    lr=_api_login("v3",timeout=30); lr.raise_for_status(); token=lr.json()["token"]
+    before_offers=scan_offers(token)
+    rows=[]
+    for sku in TARGET_SKUS:
+        matches=[o for o in before_offers if sku in _offer_skus(o)]
+        if len(matches)!=1: raise RuntimeError(f"{sku}: expected 1 PHH offer, got {len(matches)}")
+        o=matches[0]; oid=int(o["id"]); before=int(o.get("amount") or 0)
+        rows.append({"sku":sku,"offer_id":oid,"phh_status":_s(o.get("status")),"before":before,"target":shop[sku]["qty"],"title":shop[sku]["title"],"shopify_status":shop[sku]["status"]})
+    print("OWNER_STOCK_BATCH3_PREFLIGHT "+json.dumps(rows,ensure_ascii=False,separators=(",",":")),flush=True)
+
+    to_write=[x for x in rows if x["before"]!=x["target"]]
+    if to_write:
+        payload=[{"id":x["offer_id"],"amount":x["target"]} for x in to_write]
+        r=requests.patch(urljoin(BASE,"/v3/offers"),headers=_phh_headers(token),json=payload,timeout=60)
+        if r.status_code!=200: raise RuntimeError(f"PATCH HTTP {r.status_code}: {r.text[:1000]}")
+        print("OWNER_STOCK_BATCH3_PATCH "+json.dumps({"payload":payload,"http":r.status_code},separators=(",",":")),flush=True)
+    else:
+        print("OWNER_STOCK_BATCH3_PATCH "+json.dumps({"payload":[],"http":"NOOP"},separators=(",",":")),flush=True)
+
+    time.sleep(1)
+    after_offers=scan_offers(token)
+    byid={int(o["id"]):o for o in after_offers if o.get("id") is not None}
+    report=[]
+    for x in rows:
+        o=byid.get(x["offer_id"])
+        after=None if o is None else int(o.get("amount") or 0)
+        report.append({**x,"after":after,"verified":after==x["target"],"status_after":None if o is None else _s(o.get("status"))})
+    print("OWNER_STOCK_BATCH3_RESULT "+json.dumps(report,ensure_ascii=False,separators=(",",":")),flush=True)
+    if not all(x["verified"] for x in report): raise RuntimeError("post-write verification failed")
+    return {"status":"PASS","rows":report,"phh_writes":len(to_write),"shopify_writes":0}
+
+if __name__=="__main__": run()
