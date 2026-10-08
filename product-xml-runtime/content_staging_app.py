@@ -1411,6 +1411,12 @@ def _boot():
             print('OWNER_STOCK_BATCH3_BOOT_FAILED',type(e).__name__,str(e)[:500],flush=True)
             raise
     restored=_restore_full_catalog()
+    if os.getenv('RUN_OWNER_PRICE_MISMATCH_REPORT','').strip()=='1':
+        try:
+            from owner_price_mismatch_report import run as _run_owner_price_mismatch_report
+            _run_owner_price_mismatch_report()
+        except Exception as e:
+            print('OWNER_PRICE_MISMATCH_REPORT_FAILED',type(e).__name__,str(e)[:500],flush=True)
     _restore_existing_autocheck()
     _restore_latest()
     print('CONTENT_STAGING_ENV',json.dumps({k:bool(os.getenv(k)) for k in
