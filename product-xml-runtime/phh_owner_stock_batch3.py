@@ -7,6 +7,7 @@ from phh_master_audit_v30 import scan_offers, _offer_skus, _s
 from app import _shopify_token
 
 TARGET_SKUS=["STAL/02/35-38","OUTF420","ss11474"]
+EXCLUDED_SKUS={"80066","BU HEMONET blk","BU ZEHA ora","ss8371M","37W332B-4L","CNK2300SD014","NH19Y001-Z","000056-0023-XS","000121-0002-S","000121-0066-2XL","000121-0066-3XL","000121-0066-L","000121-0066-M","000121-0066-XL","000121-0222-2XL","000121-0223-3XL","1948","3574","RASUBE","TB626"}
 
 def _phh_headers(token):
     return {"User-Agent":"outfish-owner-stock-batch3/1.0","Accept":"application/json","Content-Type":"application/json","Authorization":"Pigu-mp "+token}
@@ -27,9 +28,13 @@ def _shopify_live():
             n=(e or {}).get("node") or {}
             if str(n.get("sku") or "").strip()==sku: matches.append(n)
         if len(matches)!=1: raise RuntimeError(f"{sku}: expected 1 Shopify variant, got {len(matches)}")
-        n=matches[0]; qty=int(n.get("inventoryQuantity"))
+        n=matches[0]; qty=int(n.get("inventoryQuantity")); p=n.get("product") or {}
+        if sku in EXCLUDED_SKUS: raise RuntimeError(f"{sku}: blocked by owner exclusion list")
         if qty<0: raise RuntimeError(f"{sku}: negative Shopify stock {qty}")
-        out[sku]={"qty":qty,"title":((n.get("product") or {}).get("title")),"status":((n.get("product") or {}).get("status"))}
+        if str(p.get("status") or "").upper()!="ACTIVE": raise RuntimeError(f"{sku}: Shopify status not ACTIVE")
+        price=float(n.get("price") or 0)
+        if price<10: raise RuntimeError(f"{sku}: price below 10 EUR")
+        out[sku]={"qty":qty,"title":p.get("title"),"status":p.get("status"),"price":price}
     return out
 
 def run():
