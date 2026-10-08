@@ -1402,6 +1402,14 @@ def _boot():
     except Exception as e:
         print('OUTFISH_CATALOG_GATE_SELFTEST_ERROR',type(e).__name__,flush=True)
         return
+    if os.getenv('RUN_OWNER_STOCK_BATCH3','').strip()=='1':
+        try:
+            from phh_owner_stock_batch3 import run as _run_owner_stock_batch3
+            out=_run_owner_stock_batch3()
+            print('OWNER_STOCK_BATCH3_BOOT '+json.dumps(out,ensure_ascii=False,separators=(',',':')),flush=True)
+        except Exception as e:
+            print('OWNER_STOCK_BATCH3_BOOT_FAILED',type(e).__name__,str(e)[:500],flush=True)
+            raise
     restored=_restore_full_catalog()
     _restore_existing_autocheck()
     _restore_latest()
