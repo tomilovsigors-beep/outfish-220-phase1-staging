@@ -49,7 +49,11 @@ def run():
         rows.append({"sku":sku,"offer_id":oid,"phh_status":_s(o.get("status")),"before":before,"target":shop[sku]["qty"],"title":shop[sku]["title"],"shopify_status":shop[sku]["status"]})
     print("OWNER_STOCK_BATCH3_PREFLIGHT "+json.dumps(rows,ensure_ascii=False,separators=(",",":")),flush=True)
 
+    write_enabled=os.getenv("OWNER_STOCK_BATCH3_WRITE","0").strip()=="1"
     to_write=[x for x in rows if x["before"]!=x["target"]]
+    if not write_enabled:
+        print("OWNER_STOCK_BATCH3_DRY_RUN "+json.dumps({"write_enabled":False,"would_write":[{"id":x["offer_id"],"amount":x["target"]} for x in to_write]},separators=(",",":")),flush=True)
+        return {"status":"DRY_RUN","rows":rows,"phh_writes":0,"shopify_writes":0}
     if to_write:
         payload=[{"id":x["offer_id"],"amount":x["target"]} for x in to_write]
         r=requests.patch(urljoin(BASE,"/v3/offers"),headers=_phh_headers(token),json=payload,timeout=60)
