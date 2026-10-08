@@ -15,7 +15,7 @@ def _phh_headers(token):
 def _shopify_live():
     token=_shopify_token()
     shop=os.getenv("SHOPIFY_SHOP_DOMAIN","153ac6-2.myshopify.com").strip()
-    q='''query StockOwnerBatch($query:String!){productVariants(first:10,query:$query){edges{node{id sku inventoryQuantity product{title status}}}}}'''
+    q='''query StockOwnerBatch($query:String!){productVariants(first:10,query:$query){edges{node{id sku price inventoryQuantity product{title status}}}}}'''
     out={}
     for sku in TARGET_SKUS:
         r=requests.post(f"https://{shop}/admin/api/2026-07/graphql.json",
