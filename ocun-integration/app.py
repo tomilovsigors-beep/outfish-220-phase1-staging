@@ -1,5 +1,6 @@
 import json
 import os
+import runpy
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 class Handler(BaseHTTPRequestHandler):
@@ -15,4 +16,5 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 if __name__ == '__main__':
+    runpy.run_path(os.path.join(os.path.dirname(__file__), 'probe.py'), run_name='__main__')
     HTTPServer(('0.0.0.0',int(os.environ.get('PORT','10000'))),Handler).serve_forever()
