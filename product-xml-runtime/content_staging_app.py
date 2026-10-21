@@ -1410,6 +1410,12 @@ def _boot():
         except Exception as e:
             print('OWNER_STOCK_BATCH3_BOOT_FAILED',type(e).__name__,str(e)[:500],flush=True)
             raise
+    if os.getenv('RUN_CREATE_PILOT_READONLY_PROBE','').strip()=='1':
+        try:
+            from create_pilot_readonly_probe import run as _run_create_pilot_readonly_probe
+            _run_create_pilot_readonly_probe()
+        except Exception as e:
+            print('CREATE_PILOT_READONLY_PROBE_FAILED',type(e).__name__,str(e)[:800],flush=True)
     restored=_restore_full_catalog()
     if os.getenv('RUN_OWNER_PRICE_MISMATCH_REPORT','').strip()=='1':
         try:
