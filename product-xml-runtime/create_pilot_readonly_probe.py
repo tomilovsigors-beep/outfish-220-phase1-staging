@@ -97,6 +97,13 @@ def run():
           'absence_proven':not (c['sku'] in bvals or c['ean'] in bvals) and len(offer_matches)==0
         })
 
+    comparables=[]
+    for c in COMPARABLES:
+        rr=_api_get(f"/v3/products/product-modifications/barcodes?ean={c['ean']}",token)
+        try: body=rr.json()
+        except Exception: body={'raw':rr.text[:1500]}
+        comparables.append({**c,'http_status':rr.status_code,'body':body})
+
     def norm(s): return re.sub(r'[^a-z0-9]+',' ',str(s or '').casefold()).strip()
     comparable_category_ids=set()
     for cc in comparables:
@@ -117,12 +124,6 @@ def run():
     history_json=history.json() if history.ok else {'raw':history.text[:1500]}
     gear=[x for x in (history_json.get('items') or []) if isinstance(x,dict) and str(x.get('sku') or '')==GEARAID_SKU]
 
-    comparables=[]
-    for c in COMPARABLES:
-        rr=_api_get(f"/v3/products/product-modifications/barcodes?ean={c['ean']}",token)
-        try: body=rr.json()
-        except Exception: body={'raw':rr.text[:1500]}
-        comparables.append({**c,'http_status':rr.status_code,'body':body})
     out={
       'status':'PASS','writes':0,'seller_id':SELLER_ID,
       'comparable_existing_trekking_poles':comparables,
