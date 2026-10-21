@@ -8,6 +8,8 @@ CANDIDATES=[
  {'sku':'ss8388-39-42','ean':'5908221354207'},
  {'sku':'ss10314-35-38','ean':'5908221359509'},
  {'sku':'ss10314-39-42','ean':'5908221359516'},
+ {'sku':'ss8388-43-46','ean':'5908221354214'},
+ {'sku':'ss10314-43-46','ean':'5908221359523'},
 ]
 GEARAID_EXEC='58291763'
 GEARAID_SKU='68150'
@@ -55,7 +57,9 @@ def run():
         except Exception: body={'raw':br.text[:1000]}
         matches=[{'id':o.get('id')} for o in offers if c['sku'] in set(scalars(o)) or c['ean'] in set(scalars(o))]
         results.append({**c,'ean13_valid':ean13_ok(c['ean']),'barcode_lookup_http':br.status_code,'barcode_lookup_body':body,'seller_offer_matches':matches,'offers_scanned':len(offers),'absence_proven':br.status_code==404 and not matches and ean13_ok(c['ean'])})
-    out={'status':'PASS' if all(c['absence_proven'] for c in results) else 'BLOCKED','checked_at':datetime.now(timezone.utc).isoformat(),'writes':0,'shopify_writes':0,'sia_fhm_writes':0,'seller_id':SELLER_ID,'candidates':results,'scope':'Remaining four EANs only; completed category/history/43-46 research not repeated'}
+    execution=_api_get('/v3/sellers/9990696/product/import/execution/58717994/results?limit=100&offset=0',token)
+    print('OWNER_PILOT_FINAL_RESULTS '+json.dumps({'http':execution.status_code,'body':execution.json()},ensure_ascii=False),flush=True)
+    out={'status':'PASS' if all(c['absence_proven'] for c in results) else 'BLOCKED','checked_at':datetime.now(timezone.utc).isoformat(),'writes':0,'shopify_writes':0,'sia_fhm_writes':0,'seller_id':SELLER_ID,'candidates':results,'scope':'Post-rejection control GET for all six EANs; execution 58717994; no mutation or retry'}
     print('CREATE_PILOT_READONLY_PROBE '+json.dumps(out,ensure_ascii=False,sort_keys=True),flush=True)
     return out
 
