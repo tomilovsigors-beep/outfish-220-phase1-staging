@@ -1419,6 +1419,8 @@ def _boot():
     if os.getenv('RUN_OWNER_PILOT_CREATE_20261021')=='OWNER_APPROVED_RETRY_STRIP_QUERY_ONLY':
         from owner_pilot_20261021_create import guarded_run
         guarded_run()
+    from owner_ss8375_20261022_create import guarded_run as _ss8375_once
+    _ss8375_once()
     restored=_restore_full_catalog()
     if os.getenv('RUN_OWNER_PRICE_MISMATCH_REPORT','').strip()=='1':
         try:
