@@ -1382,6 +1382,8 @@ def _maybe_run_phh_card_identity_probe_v33():
         print('PHH_CARD_IDENTITY_PROBE_V33_FAILED',type(e).__name__,str(e),flush=True); traceback.print_exc()
 
 def _boot():
+    from category_refs_readonly_20261022 import run as _category_refs_readonly
+    _category_refs_readonly()
     # Restore snapshots before expensive network calls. Keep the web server responsive.
     print('OUTFISH_SAFE_BOOT_LEGACY_JOBS_DISABLED',flush=True)
     # Verify invariant gates once per worker before any full-catalog processing.
