@@ -1416,7 +1416,7 @@ def _boot():
             _run_create_pilot_readonly_probe()
         except Exception as e:
             print('CREATE_PILOT_READONLY_PROBE_FAILED',type(e).__name__,str(e)[:800],flush=True)
-    if os.getenv('RUN_OWNER_PILOT_CREATE_20261021')=='OWNER_APPROVED_EXACT_TWO_CORRECTIONS':
+    if os.getenv('RUN_OWNER_PILOT_CREATE_20261021')=='OWNER_APPROVED_RETRY_STRIP_QUERY_ONLY':
         from owner_pilot_20261021_create import guarded_run
         guarded_run()
     restored=_restore_full_catalog()
