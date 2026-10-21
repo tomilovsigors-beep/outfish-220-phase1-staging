@@ -4,13 +4,13 @@ from pmp_api_probe import _api_login,_api_get,_docs_get,_embedded_spec
 
 SELLER_ID='9990696'
 CANDIDATES=[
- {'sku':'68154','ean':'0021563681543'},
- {'sku':'kj0359','ean':'5908221323050'},
+ {'sku':'ss8388-43-46','ean':'5908221354214'},
+ {'sku':'ss10314-43-46','ean':'5908221359523'},
 ]
 GEARAID_EXEC='58291763'
 GEARAID_SKU='68150'
 GEARAID_PRODUCT_ID='270344850'
-COMPARABLES=[]
+COMPARABLES=[{'sku':'ss10309-35-38','ean':'5908221354283'}]
 
 def scalars(x):
     out=[]
@@ -98,7 +98,15 @@ def run():
         })
 
     def norm(s): return re.sub(r'[^a-z0-9]+',' ',str(s or '').casefold()).strip()
-    category_matches=[c for c in cats if str(c.get('category_id') or c.get('id') or '')=='3377']
+    comparable_category_ids=set()
+    for cc in comparables:
+        for item in (cc.get('body') if isinstance(cc.get('body'),list) else []):
+            try:
+                cid=((item.get('modification') or {}).get('category') or {}).get('id')
+                if cid is not None: comparable_category_ids.add(str(cid))
+            except Exception:
+                pass
+    category_matches=[c for c in cats if str(c.get('category_id') or c.get('id') or '') in comparable_category_ids]
 
     docs=_docs_get('/docs'); docs.raise_for_status()
     spec=_embedded_spec(docs.text)
