@@ -10,6 +10,7 @@ CANDIDATES=[
 GEARAID_EXEC='58291763'
 GEARAID_SKU='68150'
 GEARAID_PRODUCT_ID='270344850'
+COMPARABLES=[{'sku':'ss9209','ean':'5908221358533'},{'sku':'3574','ean':'0713014823574'}]
 
 def scalars(x):
     out=[]
@@ -115,8 +116,15 @@ def run():
     history_json=history.json() if history.ok else {'raw':history.text[:1500]}
     gear=[x for x in (history_json.get('items') or []) if isinstance(x,dict) and str(x.get('sku') or '')==GEARAID_SKU]
 
+    comparables=[]
+    for c in COMPARABLES:
+        rr=_api_get(f"/v3/products/product-modifications/barcodes?ean={c['ean']}",token)
+        try: body=rr.json()
+        except Exception: body={'raw':rr.text[:1500]}
+        comparables.append({**c,'http_status':rr.status_code,'body':body})
     out={
       'status':'PASS','writes':0,'seller_id':SELLER_ID,
+      'comparable_existing_trekking_poles':comparables,
       'candidates':absences,
       'category_matches':category_matches,
       'product_import_request_post_schema':post_schema,
