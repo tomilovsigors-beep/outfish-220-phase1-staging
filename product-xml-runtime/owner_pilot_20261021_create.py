@@ -10,16 +10,16 @@ from pmp_api_probe import BASE, _api_login, _api_get, _docs_get, _embedded_spec
 SELLER='9990696'
 SHEET='1xBVjjcLYqiQvy2nLtl-tGt8w_7FWefWxFa2Ltthq-7I'
 PAYLOADS=json.loads(Path(__file__).with_name('owner_pilot_20261021_payloads.json').read_text(encoding='utf-8'))
-PREFIX='OWNER_PILOT_CREATE_20261021'
+PREFIX='OWNER_PILOT_RETRY1_20261021'
 def emit(kind,data):
     print(PREFIX+' '+json.dumps({'event':kind,**data},ensure_ascii=False,separators=(',',':')),flush=True)
 def body(r):
     try:return r.json()
     except Exception:return {'raw':r.text[:3000]}
 def run():
-    if os.getenv('RUN_OWNER_PILOT_CREATE_20261021')!='OWNER_APPROVED_EXACT_TWO_CORRECTIONS':
+    if os.getenv('RUN_OWNER_PILOT_CREATE_20261021')!='OWNER_APPROVED_RETRY_STRIP_QUERY_ONLY':
         return
-    try:fd=os.open('/tmp/owner_pilot_20261021.lock',os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600);os.close(fd)
+    try:fd=os.open('/tmp/owner_pilot_20261021_retry1.lock',os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600);os.close(fd)
     except FileExistsError:return
     creds=service_account.Credentials.from_service_account_info(json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT_JSON']),scopes=['https://www.googleapis.com/auth/spreadsheets'])
     sess=AuthorizedSession(creds)
@@ -27,8 +27,8 @@ def run():
         r=sess.get('https://sheets.googleapis.com/v4/spreadsheets/'+SHEET+'/values/'+quote(rng,safe=''),timeout=30);r.raise_for_status()
         return r.json().get('values') or []
     def save(state):
-        r=sess.put('https://sheets.googleapis.com/v4/spreadsheets/'+SHEET+'/values/'+quote('CREATE_PILOT!D180',safe=''),params={'valueInputOption':'RAW'},json={'values':[[json.dumps(state,ensure_ascii=False,separators=(',',':'))]]},timeout=30);r.raise_for_status()
-    existing=read('CREATE_PILOT!D180')
+        r=sess.put('https://sheets.googleapis.com/v4/spreadsheets/'+SHEET+'/values/'+quote('CREATE_PILOT!D187',safe=''),params={'valueInputOption':'RAW'},json={'values':[[json.dumps(state,ensure_ascii=False,separators=(',',':'))]]},timeout=30);r.raise_for_status()
+    existing=read('CREATE_PILOT!D187')
     if existing and existing[0] and existing[0][0]:
         emit('ALREADY_CLAIMED',{'journal':existing[0][0]});return
     for idx,row in enumerate((132,167)):
@@ -36,6 +36,40 @@ def run():
         if live!=PAYLOADS[idx]:raise RuntimeError('Approved JSON differs from sheet; no writes')
     state={'status':'CLAIMED','execution_id':None,'posts':[],'shopify_writes':0,'sia_fhm_writes':0}
     save(state)
+
+    # Verify every new image URL before any PHH mutation.
+    import struct
+    def dimensions(data):
+        if data.startswith(b'\x89PNG\r\n\x1a\n'):
+            return struct.unpack('>II',data[16:24])
+        if data[:2]!=b'\xff\xd8':raise ValueError('Unsupported image bytes')
+        pos=2
+        while pos<len(data):
+            if data[pos]!=255:pos+=1;continue
+            while pos<len(data) and data[pos]==255:pos+=1
+            marker=data[pos];pos+=1
+            if marker in (0xd8,0xd9) or 0xd0<=marker<=0xd7:continue
+            size=int.from_bytes(data[pos:pos+2],'big')
+            if marker in (0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf):
+                h,w=struct.unpack('>HH',data[pos+3:pos+7]);return w,h
+            if size<2:raise ValueError('Invalid JPEG segment')
+            pos+=size
+        raise ValueError('No dimensions')
+    checks=[]
+    for url in dict.fromkeys(u for p in PAYLOADS for u in p['images']):
+        check={'url':url,'pass':False}
+        try:
+            rr=requests.get(url,timeout=40)
+            typ=rr.headers.get('Content-Type','').split(';')[0].strip().lower()
+            w,h=dimensions(rr.content) if rr.status_code==200 and typ in ('image/jpeg','image/png') else (0,0)
+            check.update(http=rr.status_code,content_type=typ,width=w,height=h)
+            check['pass']=rr.status_code==200 and typ in ('image/jpeg','image/png') and w>=600 and h>=600
+        except Exception as ex:check['error']=type(ex).__name__+': '+str(ex)[:500]
+        checks.append(check);emit('IMAGE_PREFLIGHT',check)
+    state['image_preflight']=checks;save(state)
+    if not all(x['pass'] for x in checks):
+        state['status']='STOP_IMAGE_PREFLIGHT_FAILED';save(state);emit('STOP',state);return
+
     lr=_api_login('v3')
     if lr is None or not lr.ok:raise RuntimeError('PHH login unavailable')
     token=lr.json()['token']
@@ -61,6 +95,7 @@ def run():
         record={'skus':skus,'http':r.status_code,'response':body(r)}
         state['posts'].append(record);state['status']='POST_RESPONSE';save(state);emit('POST',record)
     # Poll read-only; save every changed result, never re-submit or repair.
+    accepted=sum(1 for x in state['posts'] if x['http']==200)
     last=None;final=False
     for attempt in range(180):
         rr=_api_get(f'/v3/sellers/{SELLER}/product/import/execution/{eid}/results?limit=100&offset=0',token)
@@ -69,7 +104,7 @@ def run():
         if serial!=last:
             state.update(status='POLLING',results_http=rr.status_code,results=bj);save(state);emit('RESULTS',{'execution_id':eid,'http':rr.status_code,'body':bj});last=serial
         items=bj.get('items',[]) if isinstance(bj,dict) else bj if isinstance(bj,list) else []
-        if len(items)>=2 and all(str(x.get('status','')).lower() in ('success','error','failed') for x in items):
+        if (accepted==0 or len(items)>=accepted) and all(str(x.get('status','')).lower() in ('success','error','failed') for x in items):
             final=True;break
         time.sleep(5)
     state['status']='FINAL' if final else 'PROCESSING_TIMEOUT';save(state)
