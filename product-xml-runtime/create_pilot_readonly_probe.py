@@ -4,13 +4,13 @@ from pmp_api_probe import _api_login,_api_get,_docs_get,_embedded_spec
 
 SELLER_ID='9990696'
 CANDIDATES=[
- {'sku':'CNK2550DS015FO','ean':'6977465864918'},
- {'sku':'CNK2300DS010G','ean':'6975641882749'},
+ {'sku':'68154','ean':'0021563681543'},
+ {'sku':'kj0359','ean':'5908221323050'},
 ]
 GEARAID_EXEC='58291763'
 GEARAID_SKU='68150'
 GEARAID_PRODUCT_ID='270344850'
-COMPARABLES=[{'sku':'ss9209','ean':'5908221358533'},{'sku':'3574','ean':'0713014823574'}]
+COMPARABLES=[]
 
 def scalars(x):
     out=[]
@@ -98,14 +98,7 @@ def run():
         })
 
     def norm(s): return re.sub(r'[^a-z0-9]+',' ',str(s or '').casefold()).strip()
-    category_matches=[]
-    for c in cats:
-        vals=[c.get('title_en'),c.get('name_en'),c.get('title'),c.get('name')]
-        names=[str(x) for x in vals if x]
-        n=' | '.join(names)
-        nn=norm(n)
-        if 'hiking pole' in nn or 'trekking pole' in nn or 'walking pole' in nn:
-            category_matches.append(c)
+    category_matches=[c for c in cats if str(c.get('category_id') or c.get('id') or '')=='3377']
 
     docs=_docs_get('/docs'); docs.raise_for_status()
     spec=_embedded_spec(docs.text)
