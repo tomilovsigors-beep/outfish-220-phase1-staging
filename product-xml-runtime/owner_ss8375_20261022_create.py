@@ -28,9 +28,11 @@ def dimensions(data):
         p+=n
     raise ValueError('JPEG dimensions unavailable')
 def run():
-    # Session advisory lock serializes workers. Sheet journal survives deploys.
-    with psycopg.connect(os.environ['DATABASE_URL'],autocommit=True) as lock:
-        if not lock.execute('select pg_try_advisory_lock(837520261022)').fetchone()[0]:return
+    # Single service instance; OS lock serializes workers, Sheet journal survives deploys.
+    with open('/tmp/owner_ss8375_20261022.lock','a') as lock:
+        import fcntl
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:return
         creds=service_account.Credentials.from_service_account_info(json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT_JSON']),scopes=['https://www.googleapis.com/auth/spreadsheets'])
         sess=AuthorizedSession(creds)
         def read(rng):
