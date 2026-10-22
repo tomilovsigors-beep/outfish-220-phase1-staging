@@ -1443,7 +1443,7 @@ _WORKER_BOOT_LOCK=threading.Lock()
 @app.before_request
 def _worker_boot_once():
     global _WORKER_BOOT_PID
-    if request.path == '/phh/select002-20261022.json': return
+    if request.path in ('/phh/select002-20261022.json','/owner-batch-20261023-result.json'): return
     pid=os.getpid()
     if _WORKER_BOOT_PID==pid: return
     with _WORKER_BOOT_LOCK:
@@ -1500,3 +1500,11 @@ def select002_readonly_20261022():
         except requests.RequestException as exc:
             return _json({'ean':ean,'status':'BLOCKED_NETWORK','error_type':type(exc).__name__,'writes':0},503)
 
+
+# Exact owner-approved batch only; legacy boot write gates remain disabled.
+from owner_batch_create_20261023 import start_once as _start_owner_batch23, read_result as _read_owner_batch23
+@app.get('/owner-batch-20261023-result.json')
+def owner_batch23_result():
+    out=_read_owner_batch23()
+    return _json(out[0],out[1]) if isinstance(out,tuple) else _json(out)
+_start_owner_batch23()
