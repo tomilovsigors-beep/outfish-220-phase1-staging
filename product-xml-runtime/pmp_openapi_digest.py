@@ -41,5 +41,16 @@ def run():
             enum=schema.get("enum") if isinstance(schema,dict) else None
             schema_hits.append({"name":name,"properties":props[:80],
                                 "enum_count":len(enum) if isinstance(enum,list) else 0})
+    # Full read-only evidence requested by owner; never return authentication data.
+    import pmp_api_probe as p
+    lr=p._api_login("v3")
+    cat={"request":"GET /v3/categories?id=9142&limit=100&offset=0"}
+    if lr is not None and lr.ok:
+        token=lr.json().get("token")
+        cr=p._api_get("/v3/categories?id=9142&limit=100&offset=0",token)
+        cat.update(http=cr.status_code,body=cr.json() if cr.ok else cr.text)
+    else:
+        cat.update(http=None,error="API token unavailable")
     return {"status":"PASS","openapi":spec.get("openapi"),"path_count":len(paths),
-            "candidate_paths":hits,"candidate_schemas":schema_hits,"writes":0}
+            "candidate_paths":hits,"candidate_schemas":schema_hits,"full_openapi":spec,
+            "category_9142_response":cat,"writes":0}
