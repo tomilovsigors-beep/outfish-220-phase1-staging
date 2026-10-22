@@ -1402,7 +1402,7 @@ def _boot():
     except Exception as e:
         print('OUTFISH_CATALOG_GATE_SELFTEST_ERROR',type(e).__name__,flush=True)
         return
-    if os.getenv('RUN_OWNER_STOCK_BATCH3','').strip()=='1':
+    if not SELECT002_READ_ONLY_MODE and os.getenv('RUN_OWNER_STOCK_BATCH3','').strip()=='1':
         try:
             from phh_owner_stock_batch3 import run as _run_owner_stock_batch3
             out=_run_owner_stock_batch3()
@@ -1416,7 +1416,7 @@ def _boot():
             _run_create_pilot_readonly_probe()
         except Exception as e:
             print('CREATE_PILOT_READONLY_PROBE_FAILED',type(e).__name__,str(e)[:800],flush=True)
-    if os.getenv('RUN_OWNER_PILOT_CREATE_20261021')=='OWNER_APPROVED_RETRY_STRIP_QUERY_ONLY':
+    if not SELECT002_READ_ONLY_MODE and os.getenv('RUN_OWNER_PILOT_CREATE_20261021')=='OWNER_APPROVED_RETRY_STRIP_QUERY_ONLY':
         from owner_pilot_20261021_create import guarded_run
         guarded_run()
     restored=_restore_full_catalog()
@@ -1443,10 +1443,60 @@ _WORKER_BOOT_LOCK=threading.Lock()
 @app.before_request
 def _worker_boot_once():
     global _WORKER_BOOT_PID
+    if request.path == '/phh/select002-20261022.json': return
     pid=os.getpid()
     if _WORKER_BOOT_PID==pid: return
     with _WORKER_BOOT_LOCK:
         if _WORKER_BOOT_PID==pid: return
         _WORKER_BOOT_PID=pid
         threading.Thread(target=_boot,daemon=True,name='outfish-readonly-worker-boot').start()
+
+
+
+# Owner-authorized SELECT_002 read-only batch, 2026-10-22.
+# Credentials stay in pmp_api_probe/server auth cache. No arbitrary URL proxy.
+SELECT002_READ_ONLY_MODE = True
+SELECT002_EANS = frozenset(["5902194521796","8858687351265","5908221359745","7331423013777","5908221331383","5907808619807","5907808619814","5907808619821","5908221346691","5908221346707","5908221348411","4771999498722","5908221360635","4771999498753","4771999411110","4771999411127","4771999411134","4771999411141","4771999411158","5902194521901","5902194521406","5908221344338","5908221344345","5908221349937","5908221360727","5908221361212","0852579006699","5902194521246","5902194522243","5908221359714","5908221361304","5908221361199","5908221312832","5908221340873","5908221327348","0661195006200","0661195000857","5902194522380","5902194522083","0021563681505","852579006699","661195006200","661195000857","021563681505"])
+SELECT002_LOCK = threading.Lock()
+SELECT002_CACHE = {}
+
+def _select002_classify(status, body):
+    if status == 200 and isinstance(body, list) and body:
+        return 'FOUND'
+    if status == 404 and isinstance(body, dict) and body.get('code') == 404 and str(body.get('message','')).strip().lower() == 'barcode not found':
+        return 'NOT_FOUND'
+    return 'UNKNOWN'
+
+@app.get('/phh/select002-20261022.json')
+def select002_readonly_20261022():
+    ean = request.args.get('ean','')
+    if ean not in SELECT002_EANS:
+        return _json({'status':'REJECTED_NOT_IN_OWNER_BATCH','writes':0},400)
+    with SELECT002_LOCK:
+        cached = SELECT002_CACHE.get(ean)
+        if cached is not None:
+            return _json(cached)
+        from pmp_api_probe import _api_login, _api_get
+        login = _api_login('v3', allow_network_login=False)
+        if login is None or not login.ok:
+            return _json({'status':'BLOCKED_NO_VALID_SERVER_TOKEN','writes':0},503)
+        token = login.json().get('token')
+        if not token:
+            return _json({'status':'BLOCKED_NO_VALID_SERVER_TOKEN','writes':0},503)
+        try:
+            result = _api_get('/v3/products/product-modifications/barcodes?ean='+ean, token, timeout=20)
+            try: body = result.json()
+            except ValueError: body = {'raw':result.text[:6000]}
+            out = {'ean':ean,'http':result.status_code,'body':body,
+                   'lookup_status':_select002_classify(result.status_code,body),
+                   'checked_at':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),
+                   'endpoint':'GET /v3/products/product-modifications/barcodes',
+                   'writes':0,'shopify_writes':0,'sia_fhm_writes':0}
+            if result.status_code in (401,403,429) or result.status_code >=500:
+                out['status']='BLOCKED_ACCESS'
+            else: out['status']='CHECKED'
+            SELECT002_CACHE[ean] = out
+            return _json(out)
+        except requests.RequestException as exc:
+            return _json({'ean':ean,'status':'BLOCKED_NETWORK','error_type':type(exc).__name__,'writes':0},503)
 
