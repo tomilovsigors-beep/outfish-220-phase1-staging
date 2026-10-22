@@ -3,7 +3,7 @@ import json,os,time,hashlib,threading,requests
 # One-shot owner authorization: two exact Thermowave payloads approved 2026-10-23.
 # Google Sheets intent journal prevents repeats; one process lock serializes workers.
 OWNER_BATCH23 = [{"model": "14BAND520-480", "sha256": "4de0c16e95dd444dddd6e06d5b8052b80e56b865b2f30ca8f996754ea0c65db1"}, {"model": "14TUBM530-990", "sha256": "8ee5883da3acecac5e241409480ee2c39e21ac4d46c27b4f267074966f347248"}]
-OWNER_BATCH23_KEY = 'owner_9142_thermowave_resume_20261023_v2'
+OWNER_BATCH23_KEY = 'owner_9142_thermowave_resume_20261023_v3'
 MASTER_ID = '1xBVjjcLYqiQvy2nLtl-tGt8w_7FWefWxFa2Ltthq-7I'
 HEADERS=['SKU','SHA-256','execution_id','статус','product_id','время']
 def _owner23_body(r):
@@ -257,7 +257,7 @@ def _owner23_run_locked():
 def _owner23_run():
     # Render has one instance. Linux flock additionally excludes all Gunicorn workers.
     import fcntl
-    with open('/tmp/outfish-owner-batch23.lock','a') as lock:
+    with open('/tmp/outfish-owner-thermowave-20261023-v3.lock','a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:return
         _owner23_run_locked()
@@ -268,8 +268,28 @@ def read_result():
     except Exception as ex:return ({'status':'READ_ERROR','error_type':type(ex).__name__},503)
 
 def _owner23_guarded():
+    print('OWNER_BATCH23_WORKER_START',os.getpid(),flush=True)
     try:_owner23_run()
-    except Exception as ex:print('OWNER_BATCH23_BOOT_ERROR',type(ex).__name__,flush=True)
+    except Exception as ex:print('OWNER_BATCH23_BOOT_ERROR',type(ex).__name__,str(ex)[:500],flush=True)
+
+_WORKER_STARTED_PID=None
+_WORKER_START_LOCK=threading.Lock()
+_WORKER_HOOK_REGISTERED=False
 
 def start_once():
-    threading.Thread(target=_owner23_guarded,daemon=True,name='owner-approved-batch23').start()
+    # Gunicorn's existing v11z hook imports this app in the master before fork.
+    # Register only; never create a thread or acquire the batch file lock there.
+    global _WORKER_HOOK_REGISTERED
+    if _WORKER_HOOK_REGISTERED:return
+    from content_staging_app import app
+    @app.before_request
+    def _owner_batch23_worker_start_once():
+        global _WORKER_STARTED_PID
+        pid=os.getpid()
+        if _WORKER_STARTED_PID==pid:return
+        with _WORKER_START_LOCK:
+            if _WORKER_STARTED_PID==pid:return
+            _WORKER_STARTED_PID=pid
+            threading.Thread(target=_owner23_guarded,daemon=True,name='owner-approved-thermowave-worker').start()
+    _WORKER_HOOK_REGISTERED=True
+
