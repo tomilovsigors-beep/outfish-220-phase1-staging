@@ -1,9 +1,9 @@
 """One owner-approved batch, 2026-10-23. Reads exact JSON from private Master; no payload copy in repository."""
 import json,os,time,hashlib,threading,requests
-# One-shot owner authorization: eight exact payloads approved 2026-10-23.
+# One-shot owner authorization: two exact Thermowave payloads approved 2026-10-23.
 # Google Sheets intent journal prevents repeats; one process lock serializes workers.
-OWNER_BATCH23 = [{"model":"ss9235","sha256":"beaf4d34058f0a5b11fa31b0365c56695259cac598b1bbbc5bf2a649c69ff1f9"},{"model":"ss9196","sha256":"054ab0d0e1c98ecbbaf44b243b1786bfc19bb4460bc00f81f98ff2fcfdf7dd1c"},{"model":"kj0529XS","sha256":"a9550795e560160f47f37a2c0efbed58eff68896a77b5010fb7348f14064abb0"},{"model":"ss3437sm","sha256":"5e8fc864396c3fccea8e2712d9e3d188106e62e15639a513e56167a4e20602db"},{"model":"ss3944","sha256":"bdf8d48835f813e04bb33ed5d5cd659eab1c23cde4aa86aea43dad71215196d7"},{"model":"14BAND520-480","sha256":"4de0c16e95dd444dddd6e06d5b8052b80e56b865b2f30ca8f996754ea0c65db1"},{"model":"14TUBM530-990","sha256":"8ee5883da3acecac5e241409480ee2c39e21ac4d46c27b4f267074966f347248"},{"model":"32051-S/M","sha256":"fbd0cdd3d01ffb9d7f92140d9b0d9e23f3d2ae9e35552a02c9d75b2c7cf1e1ea"}]
-OWNER_BATCH23_KEY = 'owner_9142_create_20261023_dbfree_v1'
+OWNER_BATCH23 = [{"model": "14BAND520-480", "sha256": "4de0c16e95dd444dddd6e06d5b8052b80e56b865b2f30ca8f996754ea0c65db1"}, {"model": "14TUBM530-990", "sha256": "8ee5883da3acecac5e241409480ee2c39e21ac4d46c27b4f267074966f347248"}]
+OWNER_BATCH23_KEY = 'owner_9142_thermowave_resume_20261023_v2'
 MASTER_ID = '1xBVjjcLYqiQvy2nLtl-tGt8w_7FWefWxFa2Ltthq-7I'
 HEADERS=['SKU','SHA-256','execution_id','статус','product_id','время']
 def _owner23_body(r):
@@ -36,6 +36,8 @@ def _owner23_jpeg_dims(b):
 
 def _now():return time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
 
+_RESULT_CACHE = None
+
 class SheetsJournal:
     def __init__(self):
         from google.oauth2 import service_account
@@ -43,43 +45,61 @@ class SheetsJournal:
         creds=service_account.Credentials.from_service_account_info(json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT_JSON']),scopes=['https://www.googleapis.com/auth/spreadsheets'])
         self.gs=AuthorizedSession(creds)
         self.base='https://sheets.googleapis.com/v4/spreadsheets/'+MASTER_ID
+        self.log_rows=None
+        self.last_request=None
+    def pause(self):
+        # At most20 Sheets calls/minute, including reads; monitoring uses memory.
+        if self.last_request is not None:
+            delay=3.0-(time.monotonic()-self.last_request)
+            if delay>0:time.sleep(delay)
+        self.last_request=time.monotonic()
     def read(self,rng):
         from urllib.parse import quote
+        self.pause()
         r=self.gs.get(self.base+'/values/'+quote(rng,safe=''),timeout=40);r.raise_for_status()
         return r.json().get('values',[])
     def state(self):
         rows=self.read('CREATE_BATCH_02!D218')
         return json.loads(rows[0][0]) if rows and rows[0] else {}
+    def load_log_once(self):
+        if self.log_rows is not None:raise RuntimeError('CREATE_LOG_ALREADY_LOADED')
+        self.log_rows=self.read('CREATE_LOG!A1:F200')
+        if not self.log_rows or self.log_rows[0]!=HEADERS:raise RuntimeError('CREATE_LOG_HEADER_MISMATCH')
+    def locate(self,sku):
+        if self.log_rows is None:raise RuntimeError('CREATE_LOG_NOT_LOADED')
+        matches=[(i+1,r) for i,r in enumerate(self.log_rows) if i>0 and r and str(r[0]).casefold()==sku.casefold()]
+        if len(matches)!=1:raise RuntimeError('CREATE_LOG_SKU_NOT_UNIQUE:'+sku)
+        return matches[0]
     def check_model(self,model,status):
-        rows=self.read('CREATE_LOG!A1:F200')
-        if not rows or rows[0]!=HEADERS:raise RuntimeError('CREATE_LOG_HEADER_MISMATCH')
+        # Check the startup snapshot plus acknowledged atomic writes; no new GET.
         for sku in model['skus']:
-            matches=[r for r in rows[1:] if r and str(r[0]).casefold()==sku.casefold()]
-            if len(matches)!=1:raise RuntimeError('CREATE_LOG_SKU_NOT_UNIQUE:'+sku)
-            r=matches[0]+['']*6
-            if r[1]!=model['sha256'] or r[3]!=status:raise RuntimeError('CREATE_LOG_REPEAT_OR_HASH_BLOCK:'+sku)
+            rn,row=self.locate(sku);r=row+['']*6
+            if r[1]!=model['sha256'] or r[3]!=status or r[4]:raise RuntimeError('CREATE_LOG_REPEAT_OR_HASH_BLOCK:'+sku)
             if status=='POST_INTENT' and str(r[2])!=str(model['execution_id']):raise RuntimeError('CREATE_LOG_EXECUTION_MISMATCH:'+sku)
     def save(self,state):
+        global _RESULT_CACHE
         state['updated_at']=_now()
-        # Disarm at first claim, before any PHH action, and keep disarmed forever.
         state['run_enabled']=False
         text=json.dumps(state,ensure_ascii=False)
         if len(text)>49000:raise RuntimeError('STATE_EXCEEDS_SHEETS_CELL')
-        data=[{'range':'CREATE_BATCH_02!D218:F218','values':[[text,state['status'],'CREATE_LOG — durable no-repeat journal; startup disabled']]}]
-        if state.get('models'):
-            rows=[]
-            for a in OWNER_BATCH23:
-                m=state['models'].get(a['model'])
-                if not m:continue
-                m['execution_id']=state.get('execution_id') or ''
-                rows.extend([[sku,m['sha256'],m['execution_id'],m['status'],m.get('product_id',''),state['updated_at']] for sku in m['skus']])
-            if len(rows)!=12:raise RuntimeError('CREATE_LOG_EXPECTED_12_SKUS')
-            data.append({'range':'CREATE_LOG!A2:F13','values':rows})
-        r=self.gs.post(self.base+'/values:batchUpdate',json={'valueInputOption':'RAW','data':data},timeout=60)
-        r.raise_for_status()
-        saved=self.state()
-        if saved.get('updated_at')!=state['updated_at'] or saved.get('status')!=state['status'] or saved.get('run_enabled') is not False:
-            raise RuntimeError('JOURNAL_READBACK_FAILED')
+        data=[{'range':'CREATE_BATCH_02!D218:F218','values':[[text,state['status'],'Thermowave only; run disabled; CREATE_LOG cached once, atomic throttled writes']]}]
+        changed=[]
+        if set(state['models'])!={a['model'] for a in OWNER_BATCH23}:raise RuntimeError('ONLY_TWO_THERMOWAVE_MODELS_ALLOWED')
+        for a in OWNER_BATCH23:
+            m=state['models'][a['model']]
+            m['execution_id']=state.get('execution_id') or ''
+            if m['skus']!=[a['model']]:raise RuntimeError('EXPECTED_ONE_VARIANT_PER_THERMOWAVE_MODEL')
+            sku=m['skus'][0];rn,old=self.locate(sku)
+            row=[sku,m['sha256'],m['execution_id'],m['status'],m.get('product_id',''),state['updated_at']]
+            data.append({'range':f'CREATE_LOG!A{rn}:F{rn}','values':[row]});changed.append((rn,row))
+        # Values echoed by the atomic write confirm persistence without another read.
+        self.pause()
+        r=self.gs.post(self.base+'/values:batchUpdate',json={'valueInputOption':'RAW','includeValuesInResponse':True,'responseValueRenderOption':'UNFORMATTED_VALUE','data':data},timeout=60)
+        r.raise_for_status();responses=r.json().get('responses',[])
+        if len(responses)!=len(data) or any(a.get('updatedData',{}).get('values')!=b['values'] for a,b in zip(responses,data)):
+            raise RuntimeError('JOURNAL_WRITE_ACK_MISMATCH_NO_POST')
+        for rn,row in changed:self.log_rows[rn-1]=row
+        _RESULT_CACHE=json.loads(json.dumps(state))
 
 def _owner23_run_locked():
     from urllib.parse import urljoin,quote
@@ -87,22 +107,22 @@ def _owner23_run_locked():
     from google.auth.transport.requests import AuthorizedSession
     from pmp_api_probe import BASE,_api_login,_api_get
     journal=SheetsJournal()
+    global _RESULT_CACHE
     gate=journal.state()
+    _RESULT_CACHE=json.loads(json.dumps(gate))
     if gate.get('job')!=OWNER_BATCH23_KEY or gate.get('run_enabled') is not True or gate.get('status')!='ARMED':return
-    # Validate all twelve untouched READY entries before consuming this authorization.
+    # One startup read, then only the two explicitly reauthorized unposted models.
+    if set(gate.get('models',{}))!={a['model'] for a in OWNER_BATCH23}:raise RuntimeError('UNAUTHORIZED_MODEL_IN_GATE')
+    journal.load_log_once()
     for approved in OWNER_BATCH23:
         model=gate['models'][approved['model']]
         if model['sha256']!=approved['sha256']:raise RuntimeError('ARMED_HASH_MISMATCH')
-        journal.check_model(model,'READY')
+        journal.check_model(model,'READY_THERMOWAVE_OWNER_OK')
     state={'job':OWNER_BATCH23_KEY,'status':'CLAIMED','started_at':_now(),'execution_id':None,'posts':[],'models':json.loads(json.dumps(gate['models'])),'shopify_writes':0,'sia_fhm_writes':0,'automatic_retry':False,'run_enabled':False}
     def save():journal.save(state)
     save()
     try:
-        creds=service_account.Credentials.from_service_account_info(json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT_JSON']),scopes=['https://www.googleapis.com/auth/spreadsheets'])
-        gs=AuthorizedSession(creds)
-        ur='https://sheets.googleapis.com/v4/spreadsheets/1xBVjjcLYqiQvy2nLtl-tGt8w_7FWefWxFa2Ltthq-7I/values/'+quote('CREATE_BATCH_02!D207:D215',safe='')
-        rr=gs.get(ur,timeout=30);rr.raise_for_status()
-        live=[json.loads(r[0]) for r in rr.json()['values'] if r and r[0]]
+        live=[json.loads(r[0]) for r in journal.read('CREATE_BATCH_02!D207:D215') if r and r[0]]
         registry=journal.read('PROJECT_LOG!A57:D64')
         approved_registry={r[2]:r[3] for r in registry if len(r)>=4 and r[1]=='OWNER_APPROVED_SHA256'}
         batch=[]
@@ -111,6 +131,8 @@ def _owner23_run_locked():
             if len(matches)!=1:raise ValueError('APPROVED_MODEL_NOT_UNIQUE')
             x={'model':approved['model'],'sha256':approved['sha256'],'payload':matches[0]['phh_payload']}
             batch.append(x)
+            payload=x['payload']
+            if payload.get('category_id')!=9142 or [f['value'] for f in payload['product_features'] if f['name']=='Prekės ženklas']!=['Thermowave']:raise RuntimeError('ONLY_DICTIONARY_CONFIRMED_THERMOWAVE_ALLOWED')
             payload=x['payload']; digest=hashlib.sha256(json.dumps(payload,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
             if digest!=x['sha256'] or approved_registry.get(x['model'])!=digest or not any(v.get('model')==x['model'] and v.get('phh_payload')==payload for v in live): raise ValueError('APPROVED_PAYLOAD_MISMATCH:'+x['model'])
             state['models'][x['model']]={'sha256':digest,'skus':[m['sku'] for m in payload['modifications']],'status':'PRECHECK','images':[]}
@@ -132,7 +154,8 @@ def _owner23_run_locked():
             state['status']='STOP_IMAGE_PREFLIGHT_FAILED';save();return
         # SELECT_001: entire bounded stock sheet, read only, before PHH writes.
         stock_url='https://sheets.googleapis.com/v4/spreadsheets/1qWs8saSIlq1TLhcg-BLZ1dWHRojDQWRX2BlEpZTkDjE/values/'+quote('Sheet1!A1:B2544',safe='')
-        sr=gs.get(stock_url,timeout=40);sr.raise_for_status()
+        journal.pause()
+        sr=journal.gs.get(stock_url,timeout=40);sr.raise_for_status()
         stock=sr.json().get('values',[])
         existing={str(v).strip().casefold() for row in stock for v in row if str(v).strip()}
         existing_gtin={str(row[0]).strip().zfill(13) for row in stock if row and str(row[0]).strip().isdigit()}
@@ -218,7 +241,15 @@ def _owner23_run_locked():
             for m in x['payload']['modifications']:
                 qr=_api_get('/v3/products/product-modifications/barcodes?ean='+m['eans'][0],token)
                 state['identity_after'].append({'model':x['model'],'sku':m['sku'],'ean':m['eans'][0],'http':qr.status_code,'body':_owner23_body(qr)})
-        state['size_encoding_observation']='NOT_PROVEN_BY_IMPORT_SUCCESS; needs portal Features read'
+        state['size_encoding_observation']='No multi-size glove in this run; separate Existing values proven previously on271198525/271198530'
+        state['autocheck']=[]
+        for entry in state['identity_after']:
+            for item in entry['body'] if isinstance(entry['body'],list) else []:
+                if (item.get('modification') or {}).get('app_name')!='220.lv':continue
+                external=item.get('id')
+                if external:
+                    ar=_api_get('/v3/product-modification/pigu-external-id/'+str(external)+'/auto-check-errors',token)
+                    state['autocheck'].append({'sku':entry['sku'],'pigu_external_id':external,'http':ar.status_code,'body':_owner23_body(ar),'validator_19_included':True})
         save()
     except Exception as ex:
         state.update(status='STOP_EXCEPTION',error_type=type(ex).__name__,error=str(ex)[:700]);save()
@@ -232,6 +263,7 @@ def _owner23_run():
         _owner23_run_locked()
 
 def read_result():
+    if _RESULT_CACHE is not None:return json.loads(json.dumps(_RESULT_CACHE))
     try:return SheetsJournal().state()
     except Exception as ex:return ({'status':'READ_ERROR','error_type':type(ex).__name__},503)
 
