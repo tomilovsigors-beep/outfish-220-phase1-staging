@@ -2,8 +2,8 @@
 import json,os,time,hashlib,threading,requests
 # One-shot owner authorization: two exact Thermowave payloads approved 2026-10-23.
 # Google Sheets intent journal prevents repeats; one process lock serializes workers.
-OWNER_BATCH23 = [{"model": "14BAND520-480", "sha256": "4de0c16e95dd444dddd6e06d5b8052b80e56b865b2f30ca8f996754ea0c65db1"}, {"model": "14TUBM530-990", "sha256": "8ee5883da3acecac5e241409480ee2c39e21ac4d46c27b4f267074966f347248"}]
-OWNER_BATCH23_KEY = 'owner_9142_thermowave_resume_20261023_v3'
+OWNER_BATCH23 = [{'model': '8858687351265', 'sha256': '6678554ec3557613f0336cf72cb1a281c5c033ec3af2f23110297b2bd4eb4cc7', 'skus': ['8858687351265']}, {'model': '12WARM712-970XS', 'sha256': '87a1a961e98f38aadfb98e3655529d70e4f0aa65e281285181ab3f4c902a3b00', 'skus': ['12WARM712-970XS', '12WARM712-970S', '12WARM712-970M', '12WARM712-970L', '12WARM712-970XL']}, {'model': 'EASYhammock', 'sha256': '87dd9fdea8c29dc162697dd394b7cdf553f90c53da8f8ce658ee3ab6a6f0cecc', 'skus': ['EASYhammock']}, {'model': 'Tarp ultra-3x3', 'sha256': '922b294faad3c842115ea4f5889fcc546a7fa572bea296a288e03ddae6407e7d', 'skus': ['Tarp ultra-3x3']}, {'model': 'frontierolive', 'sha256': 'a03c43fdfdc6b5604a5454a9bdfe911b82ec45cd5d1117b26807722525c10f74', 'skus': ['frontierolive']}]
+OWNER_BATCH23_KEY = 'owner_nonfn_20261023_v1'
 MASTER_ID = '1xBVjjcLYqiQvy2nLtl-tGt8w_7FWefWxFa2Ltthq-7I'
 HEADERS=['SKU','SHA-256','execution_id','статус','product_id','время']
 def _owner23_body(r):
@@ -59,7 +59,7 @@ class SheetsJournal:
         r=self.gs.get(self.base+'/values/'+quote(rng,safe=''),timeout=40);r.raise_for_status()
         return r.json().get('values',[])
     def state(self):
-        rows=self.read('CREATE_BATCH_02!D218')
+        rows=self.read('CREATE_BATCH_02!D241')
         return json.loads(rows[0][0]) if rows and rows[0] else {}
     def load_log_once(self):
         if self.log_rows is not None:raise RuntimeError('CREATE_LOG_ALREADY_LOADED')
@@ -82,16 +82,17 @@ class SheetsJournal:
         state['run_enabled']=False
         text=json.dumps(state,ensure_ascii=False)
         if len(text)>49000:raise RuntimeError('STATE_EXCEEDS_SHEETS_CELL')
-        data=[{'range':'CREATE_BATCH_02!D218:F218','values':[[text,state['status'],'Thermowave only; run disabled; CREATE_LOG cached once, atomic throttled writes']]}]
+        data=[{'range':'CREATE_BATCH_02!D241:F218','values':[[text,state['status'],'Owner-approved non-FN batch only; run disabled; cached CREATE_LOG and atomic intent']]}]
         changed=[]
-        if set(state['models'])!={a['model'] for a in OWNER_BATCH23}:raise RuntimeError('ONLY_TWO_THERMOWAVE_MODELS_ALLOWED')
+        if set(state['models'])!={a['model'] for a in OWNER_BATCH23}:raise RuntimeError('ONLY_APPROVED_NONFN_MODELS_ALLOWED')
         for a in OWNER_BATCH23:
             m=state['models'][a['model']]
             m['execution_id']=state.get('execution_id') or ''
-            if m['skus']!=[a['model']]:raise RuntimeError('EXPECTED_ONE_VARIANT_PER_THERMOWAVE_MODEL')
-            sku=m['skus'][0];rn,old=self.locate(sku)
-            row=[sku,m['sha256'],m['execution_id'],m['status'],m.get('product_id',''),state['updated_at']]
-            data.append({'range':f'CREATE_LOG!A{rn}:F{rn}','values':[row]});changed.append((rn,row))
+            if m['skus']!=a['skus']:raise RuntimeError('EXPECTED_APPROVED_SKUS_ONLY')
+            for sku in m['skus']:
+                rn,old=self.locate(sku)
+                row=[sku,m['sha256'],m['execution_id'],m['status'],m.get('product_id',''),state['updated_at']]
+                data.append({'range':f'CREATE_LOG!A{rn}:F{rn}','values':[row]});changed.append((rn,row))
         # Values echoed by the atomic write confirm persistence without another read.
         self.pause()
         r=self.gs.post(self.base+'/values:batchUpdate',json={'valueInputOption':'RAW','includeValuesInResponse':True,'responseValueRenderOption':'UNFORMATTED_VALUE','data':data},timeout=60)
@@ -117,14 +118,14 @@ def _owner23_run_locked():
     for approved in OWNER_BATCH23:
         model=gate['models'][approved['model']]
         if model['sha256']!=approved['sha256']:raise RuntimeError('ARMED_HASH_MISMATCH')
-        journal.check_model(model,'READY_THERMOWAVE_OWNER_OK')
+        journal.check_model(model,'READY_NONFN_OWNER_OK')
     state={'job':OWNER_BATCH23_KEY,'status':'CLAIMED','started_at':_now(),'execution_id':None,'posts':[],'models':json.loads(json.dumps(gate['models'])),'shopify_writes':0,'sia_fhm_writes':0,'automatic_retry':False,'run_enabled':False}
     def save():journal.save(state)
     save()
     try:
-        live=[json.loads(r[0]) for r in journal.read('CREATE_BATCH_02!D207:D215') if r and r[0]]
-        registry=journal.read('PROJECT_LOG!A57:D64')
-        approved_registry={r[2]:r[3] for r in registry if len(r)>=4 and r[1]=='OWNER_APPROVED_SHA256'}
+        live=[json.loads(r[0]) for r in journal.read('CREATE_BATCH_02!D231:D235') if r and r[0]]
+        registry=journal.read('PROJECT_LOG!A79:E83')
+        approved_registry={r[2]:r[4] for r in registry if len(r)>=5 and r[1]=='NON_FN_FULL_DRY_RUN_READY'}
         batch=[]
         for approved in OWNER_BATCH23:
             matches=[v for v in live if v.get('model')==approved['model']]
@@ -132,8 +133,8 @@ def _owner23_run_locked():
             x={'model':approved['model'],'sha256':approved['sha256'],'payload':matches[0]['phh_payload']}
             batch.append(x)
             payload=x['payload']
-            if payload.get('category_id')!=9142 or [f['value'] for f in payload['product_features'] if f['name']=='Prekės ženklas']!=['Thermowave']:raise RuntimeError('ONLY_DICTIONARY_CONFIRMED_THERMOWAVE_ALLOWED')
-            payload=x['payload']; digest=hashlib.sha256(json.dumps(payload,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+            if 'Fjord Nansen' in [f['value'] for f in payload['product_features'] if f['name']=='Prekės ženklas']:raise RuntimeError('FJORD_NANSEN_GPSR_HOLD')
+            payload=x['payload']; digest=hashlib.sha256(json.dumps(payload,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
             if digest!=x['sha256'] or approved_registry.get(x['model'])!=digest or not any(v.get('model')==x['model'] and v.get('phh_payload')==payload for v in live): raise ValueError('APPROVED_PAYLOAD_MISMATCH:'+x['model'])
             state['models'][x['model']]={'sha256':digest,'skus':[m['sku'] for m in payload['modifications']],'status':'PRECHECK','images':[]}
         save()
@@ -153,7 +154,7 @@ def _owner23_run_locked():
         if any(v['status']=='SKIP_IMAGE_PREFLIGHT_FAILED' for v in state['models'].values()):
             state['status']='STOP_IMAGE_PREFLIGHT_FAILED';save();return
         # SELECT_001: entire bounded stock sheet, read only, before PHH writes.
-        stock_url='https://sheets.googleapis.com/v4/spreadsheets/1qWs8saSIlq1TLhcg-BLZ1dWHRojDQWRX2BlEpZTkDjE/values/'+quote('Sheet1!A1:B2544',safe='')
+        stock_url='https://sheets.googleapis.com/v4/spreadsheets/1qWs8saSIlq1TLhcg-BLZ1dWHRojDQWRX2BlEpZTkDjE/values/'+quote('Sheet1!A1:B2555',safe='')
         journal.pause()
         sr=journal.gs.get(stock_url,timeout=40);sr.raise_for_status()
         stock=sr.json().get('values',[])
@@ -241,7 +242,7 @@ def _owner23_run_locked():
             for m in x['payload']['modifications']:
                 qr=_api_get('/v3/products/product-modifications/barcodes?ean='+m['eans'][0],token)
                 state['identity_after'].append({'model':x['model'],'sku':m['sku'],'ean':m['eans'][0],'http':qr.status_code,'body':_owner23_body(qr)})
-        state['size_encoding_observation']='No multi-size glove in this run; separate Existing values proven previously on271198525/271198530'
+        state['size_encoding_observation']='Thermowave pants Drabužių dydis uses repeated-name accepted sizes XS,S,M,L,XL; final portal verification required'
         state['autocheck']=[]
         for entry in state['identity_after']:
             for item in entry['body'] if isinstance(entry['body'],list) else []:
@@ -257,7 +258,7 @@ def _owner23_run_locked():
 def _owner23_run():
     # Render has one instance. Linux flock additionally excludes all Gunicorn workers.
     import fcntl
-    with open('/tmp/outfish-owner-thermowave-20261023-v3.lock','a') as lock:
+    with open('/tmp/outfish-owner-nonfn-20261023-v1.lock','a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:return
         _owner23_run_locked()
@@ -290,6 +291,8 @@ def start_once():
         with _WORKER_START_LOCK:
             if _WORKER_STARTED_PID==pid:return
             _WORKER_STARTED_PID=pid
-            threading.Thread(target=_owner23_guarded,daemon=True,name='owner-approved-thermowave-worker').start()
+            threading.Thread(target=_owner23_guarded,daemon=True,name='owner-approved-nonfn-worker').start()
     _WORKER_HOOK_REGISTERED=True
+
+
 
