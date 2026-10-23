@@ -82,7 +82,7 @@ class SheetsJournal:
         state['run_enabled']=False
         text=json.dumps(state,ensure_ascii=False)
         if len(text)>49000:raise RuntimeError('STATE_EXCEEDS_SHEETS_CELL')
-        data=[{'range':'CREATE_BATCH_02!D241:F218','values':[[text,state['status'],'Owner-approved non-FN batch only; run disabled; cached CREATE_LOG and atomic intent']]}]
+        data=[{'range':'CREATE_BATCH_02!D241:F241','values':[[text,state['status'],'Owner-approved non-FN batch only; run disabled; cached CREATE_LOG and atomic intent']]}]
         changed=[]
         if set(state['models'])!={a['model'] for a in OWNER_BATCH23}:raise RuntimeError('ONLY_APPROVED_NONFN_MODELS_ALLOWED')
         for a in OWNER_BATCH23:
